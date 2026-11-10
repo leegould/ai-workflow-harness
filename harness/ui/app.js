@@ -10,8 +10,11 @@ const WAIT_TITLE = { questions: "The readiness check has questions", escalated: 
 
 const $ = (id) => document.getElementById(id);
 let selected = location.hash.slice(1) || null;
-let shownWait = null; // which wait card is rendered, so polling doesn't wipe a half-typed comment
-let shownVerdict = null; // same for the feedback card
+// Which wait card and feedback card are rendered, so polling doesn't wipe a
+// half-typed comment. undefined means "unknown, redraw": null is a real state
+// (no card), so resetting to null would leave the last ticket's card showing.
+let shownWait;
+let shownVerdict;
 const openDetails = new Set(); // timeline entries the user expanded, kept open across polls
 
 async function api(path, opts) {
@@ -156,7 +159,7 @@ function renderVerdict(t) {
   const comment = el("textarea", { rows: 2, placeholder: "Optional: what was missing or wrong?" });
   const err = el("span", { class: "error" });
   const send = (good) => async () => {
-    try { await api(`/api/tickets/${t.id}/feedback`, { good, comment: comment.value }); shownVerdict = null; tick(); }
+    try { await api(`/api/tickets/${t.id}/feedback`, { good, comment: comment.value }); shownVerdict = undefined; tick(); }
     catch (e) { err.textContent = e.message; }
   };
   $("t-verdict").replaceChildren(el("div", { class: "verdict" },
@@ -178,7 +181,7 @@ function renderNeeds(t, actions) {
   const needsComment = actions.some((a) => a === "answer" || a === "retry");
   const buttons = actions.map((a) => el("button", { class: a === actions[0] ? "primary" : "", onclick: async () => {
     if (a === "abandon" && !confirm(`Abandon ${t.id}?`)) return;
-    try { await api(`/api/tickets/${t.id}/actions`, { action: a, comment: comment.value }); shownWait = null; tick(); }
+    try { await api(`/api/tickets/${t.id}/actions`, { action: a, comment: comment.value }); shownWait = undefined; tick(); }
     catch (e) { err.textContent = e.message; }
   } }, a === "retry" && t.wait === "error" ? "Retry step" : ACTION_LABEL[a]));
   $("t-needs").replaceChildren(el("div", { class: `needs ${t.wait === "error" ? "error-wait" : ""}` },
@@ -210,8 +213,8 @@ $("create-form").addEventListener("submit", async (ev) => {
 });
 window.addEventListener("hashchange", () => {
   selected = location.hash.slice(1) || null;
-  shownWait = null;
-  shownVerdict = null;
+  shownWait = undefined;
+  shownVerdict = undefined;
   if (selected) show(selected === "improvements" ? "improvements" : "ticket");
   tick();
 });
