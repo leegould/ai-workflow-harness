@@ -1,0 +1,244 @@
+package harness
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	_ "modernc.org/sqlite" // registers the "sqlite" driver (pure Go, no cgo)
+)
+
+var ErrNotFound = errors.New("ticket not found")
+
+// Store keeps tickets and their events in SQLite. Each ticket is a JSON
+// document plus the two columns the engine queries on, so adding a field
+// needs no migration.
+type Store struct {
+	db *sql.DB
+}
+
+const schema = `
+CREATE TABLE IF NOT EXISTS tickets (
+	id         TEXT PRIMARY KEY,
+	seq        INTEGER NOT NULL,
+	status     TEXT NOT NULL,
+	not_before INTEGER NOT NULL,
+	data       TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS events (
+	id      INTEGER PRIMARY KEY AUTOINCREMENT,
+	ticket  TEXT NOT NULL,
+	at      INTEGER NOT NULL,
+	step    TEXT NOT NULL,
+	kind    TEXT NOT NULL,
+	message TEXT NOT NULL,
+	detail  TEXT NOT NULL,
+	cost    REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS events_ticket ON events (ticket, id);
+`
+
+// Open opens (or creates) the store at path. ":memory:" works for tests.
+func Open(path string) (*Store, error) {
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		return nil, fmt.Errorf("open store: %w", err)
+	}
+	// One connection: SQLite allows one writer anyway, and it keeps :memory:
+	// databases from vanishing between connections.
+	db.SetMaxOpenConns(1)
+	if _, err := db.ExecContext(context.Background(), schema); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("create schema: %w", err)
+	}
+	return &Store{db: db}, nil
+}
+
+func (s *Store) Close() error {
+	if err := s.db.Close(); err != nil {
+		return fmt.Errorf("close store: %w", err)
+	}
+	return nil
+}
+
+// Create adds a ticket with the next ID (T-1, T-2, ...).
+func (s *Store) Create(ctx context.Context, t Ticket) (Ticket, error) {
+	var seq int
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM tickets`).Scan(&seq); err != nil {
+		return Ticket{}, fmt.Errorf("next ticket id: %w", err)
+	}
+	t.ID = fmt.Sprintf("T-%d", seq)
+	data, err := json.Marshal(t)
+	if err != nil {
+		return Ticket{}, fmt.Errorf("encode ticket: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO tickets (id, seq, status, not_before, data) VALUES (?, ?, ?, ?, ?)`,
+		t.ID, seq, t.Status, t.NotBefore.UnixMilli(), data); err != nil {
+		return Ticket{}, fmt.Errorf("insert ticket: %w", err)
+	}
+	return t, nil
+}
+
+func (s *Store) Get(ctx context.Context, id string) (Ticket, error) {
+	var data string
+	err := s.db.QueryRowContext(ctx, `SELECT data FROM tickets WHERE id = ?`, id).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Ticket{}, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	if err != nil {
+		return Ticket{}, fmt.Errorf("get %s: %w", id, err)
+	}
+	return decode(data)
+}
+
+// List returns all tickets, newest first.
+func (s *Store) List(ctx context.Context) ([]Ticket, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT data FROM tickets ORDER BY seq DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list tickets: %w", err)
+	}
+	defer rows.Close()
+	var ts []Ticket
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("list tickets: %w", err)
+		}
+		t, err := decode(data)
+		if err != nil {
+			return nil, err
+		}
+		ts = append(ts, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tickets: %w", err)
+	}
+	return ts, nil
+}
+
+func (s *Store) Save(ctx context.Context, t Ticket) error {
+	return save(ctx, s.db, t)
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func save(ctx context.Context, db execer, t Ticket) error {
+	data, err := json.Marshal(t)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", t.ID, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tickets SET status = ?, not_before = ?, data = ? WHERE id = ?`,
+		t.Status, t.NotBefore.UnixMilli(), data, t.ID); err != nil {
+		return fmt.Errorf("save %s: %w", t.ID, err)
+	}
+	return nil
+}
+
+// Claim takes the oldest queued ticket that's due and marks it running, so
+// two workers never run the same ticket.
+func (s *Store) Claim(ctx context.Context, now time.Time) (Ticket, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Ticket{}, false, fmt.Errorf("claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var data string
+	err = tx.QueryRowContext(ctx, `SELECT data FROM tickets WHERE status = ? AND not_before <= ? ORDER BY seq LIMIT 1`,
+		Queued, now.UnixMilli()).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Ticket{}, false, nil
+	}
+	if err != nil {
+		return Ticket{}, false, fmt.Errorf("claim: %w", err)
+	}
+	t, err := decode(data)
+	if err != nil {
+		return Ticket{}, false, err
+	}
+	t.Status = Running
+	if err := save(ctx, tx, t); err != nil {
+		return Ticket{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Ticket{}, false, fmt.Errorf("claim: %w", err)
+	}
+	return t, true, nil
+}
+
+// Recover requeues tickets left running by a crash or restart. Their current
+// step runs again from the start, so steps must be safe to repeat.
+func (s *Store) Recover(ctx context.Context) (int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT data FROM tickets WHERE status = ?`, Running)
+	if err != nil {
+		return 0, fmt.Errorf("recover: %w", err)
+	}
+	var stuck []Ticket
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("recover: %w", err)
+		}
+		t, err := decode(data)
+		if err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		stuck = append(stuck, t)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("recover: %w", err)
+	}
+	for _, t := range stuck {
+		t.Status = Queued
+		if err := s.Save(ctx, t); err != nil {
+			return 0, err
+		}
+	}
+	return len(stuck), nil
+}
+
+func (s *Store) AddEvent(ctx context.Context, e Event) error {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO events (ticket, at, step, kind, message, detail, cost) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		e.Ticket, e.At.UnixMilli(), e.Step, e.Kind, e.Message, e.Detail, e.CostUSD); err != nil {
+		return fmt.Errorf("add event: %w", err)
+	}
+	return nil
+}
+
+// Events returns a ticket's timeline, oldest first.
+func (s *Store) Events(ctx context.Context, id string) ([]Event, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, ticket, at, step, kind, message, detail, cost FROM events WHERE ticket = ? ORDER BY id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("events %s: %w", id, err)
+	}
+	defer rows.Close()
+	var es []Event
+	for rows.Next() {
+		var e Event
+		var at int64
+		if err := rows.Scan(&e.ID, &e.Ticket, &at, &e.Step, &e.Kind, &e.Message, &e.Detail, &e.CostUSD); err != nil {
+			return nil, fmt.Errorf("events %s: %w", id, err)
+		}
+		e.At = time.UnixMilli(at)
+		es = append(es, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("events %s: %w", id, err)
+	}
+	return es, nil
+}
+
+func decode(data string) (Ticket, error) {
+	var t Ticket
+	if err := json.Unmarshal([]byte(data), &t); err != nil {
+		return Ticket{}, fmt.Errorf("decode ticket: %w", err)
+	}
+	return t, nil
+}

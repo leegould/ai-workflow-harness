@@ -1,0 +1,102 @@
+# ai-workflow-harness
+
+The same ticket-to-deploy pipeline as [ai-workflow](https://github.com/leegould/ai-workflow),
+packaged as **one program with a UI** instead of a Temporal workflow plus workers. Run it,
+open the browser, create a ticket, and watch it go from readiness to a deployed change.
+Anything that needs a person (questions, approval, a stuck loop) shows up as a card with
+the buttons for what you can do.
+
+```sh
+go run ./cmd/harness          # then open http://localhost:8080
+make check                    # lint, govulncheck, race tests, coverage
+```
+
+It needs Go and a logged-in Claude Code CLI. On first run it creates a local stand-in for
+GitHub in `~/.cache/ai-workflow-harness-target`, seeded with `sample/poster`, a tiny Go app
+that renders an event poster. Every merge has a visible result: the UI links to the
+deployed poster.
+
+## The flow
+
+```
+readiness ─ not ready ─▶ questions for a human ─▶ answers ─▶ readiness
+    │ ready
+    ▼
+build ─▶ CI ─ fail ─▶ build (max 3 rounds, then escalate to a human)
+           │ pass
+           ▼
+        review ─ changes ─▶ build
+           │ approved
+           ▼
+        risk gate ─ medium/high ─▶ human approves
+           │ low
+           ▼
+        merge ─▶ deploy ─▶ smoke ─ fail ─▶ revert, redeploy, escalate (retry = fresh branch)
+                              │ pass
+                              ▼
+                           deployed
+```
+
+Human decisions: **answer**, **approve**, **retry** (with guidance), **take over** (you
+push to the branch, then **resume**, and your work goes through CI, review and the risk
+gate too), **abandon**. An action that doesn't fit the current wait is rejected with a
+reason.
+
+## What's real
+
+| Step | |
+|---|---|
+| Readiness | Claude Code agent (`steps/readiness.md`), read-only (Read/Glob/Grep) in a checkout of main |
+| Build | Claude Code agent (`steps/build.md`): edit tools plus `go test/vet/build/run` and `gofmt` only. The harness commits and pushes |
+| CI | The harness runs gofmt, vet and tests on the pushed commit itself, whatever the agent says it ran |
+| Risk gate | **Deterministic floor from `pipeline.yaml`:** paths (agent rules, dependencies, the CLI the smoke test uses) and diff size |
+| Merge, deploy, smoke, revert | Local git and go against the stand-in repo and a deploy folder |
+| Review | Stub: approves unless the ticket says `never-approve` |
+
+## Design
+
+- **One program, state in SQLite.** Each ticket is a JSON document. The engine runs one
+  step, then saves, so a crash loses at most the step in progress. On restart, tickets
+  that were mid-step run that step again. That's lighter durability than Temporal's, which
+  is fine for a team of 10–20 where runs take minutes and waits are visible in the UI.
+- **Gates are code, rules are config.** `pipeline.yaml` holds the round cap and the risk
+  floor. The agents never see it, so they can't argue with a gate or edit it.
+- **The harness owns the side effects.** Agents edit files. The harness checks out,
+  commits, pushes, runs CI, merges and deploys, so every action that matters goes through
+  code that logs it.
+- **Infrastructure failures aren't agent failures.** If git, the disk or the agent CLI
+  fails, the step retries with backoff, then waits for a human as an error. It never uses
+  a build round or goes to the builder as feedback.
+- **Every step writes events**, which are the ticket's timeline in the UI and its audit
+  trail: agent summaries, CI logs, risk reasons, who decided what, cost.
+
+## Layout
+
+```
+cmd/harness        the program: flags, wiring, HTTP server
+harness/           engine (steps and gates), store (SQLite), config (risk floor), API, ui/ (embedded)
+agent/             step files → prompt → Runner (Claude Code CLI today)
+target/            local stand-in for GitHub, CI and deploy
+steps/             agent step definitions: model, tools, permissions, budget, schema, prompt
+pipeline.yaml      the rules: round cap and risk floor
+sample/poster      the toy app tickets change
+```
+
+## Compared with the Temporal version
+
+| | ai-workflow (Temporal) | this harness |
+|---|---|---|
+| Moving parts | server, two workers, CLI | one binary |
+| State | event history, replayed | a JSON document per ticket, saved per step |
+| Long human waits | durable timers, free | a row in SQLite; nudges would be a poll |
+| Changing the flow mid-ticket | versioning, replay tests | in-flight tickets just carry on at their step |
+| Human interface | signals from the CLI | a UI with validated actions |
+| Best for | many tickets, long waits, strict audit | a small team that wants to see and steer everything |
+
+## Next
+
+- A real review agent, with the target's CLAUDE.md as its rubric.
+- An LLM risk note that can raise the floor but never lower it.
+- Gates per step in `pipeline.yaml`, e.g. skip review for docs-only changes, or call out
+  to a service or a person before a step runs.
+- A direct API harness for one step, to compare with Claude Code as the agent loop.

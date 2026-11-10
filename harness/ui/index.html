@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand">Harness</div>
+  <button class="new" id="new-ticket">+ New ticket</button>
+  <nav id="tickets" aria-label="Tickets"></nav>
+</aside>
+
+<main id="main">
+  <section id="create" class="panel" hidden>
+    <h1>New ticket</h1>
+    <p class="muted">Describe the outcome. The readiness check reads the code first and only asks what it can't work out.</p>
+    <form id="create-form">
+      <label>Title <input name="title" required autocomplete="off" placeholder="Dark mode poster"></label>
+      <label>Description <textarea name="description" rows="6" placeholder="What should be different when it's done, and how will we know?"></textarea></label>
+      <div class="row"><button type="submit" class="primary">Create ticket</button><span class="error" id="create-error"></span></div>
+    </form>
+  </section>
+
+  <section id="ticket" class="panel" hidden>
+    <header class="ticket-head">
+      <div>
+        <div class="muted mono" id="t-id"></div>
+        <h1 id="t-title"></h1>
+      </div>
+      <span class="pill" id="t-status"></span>
+    </header>
+    <div class="meta" id="t-meta"></div>
+    <ol class="stepper" id="t-steps"></ol>
+    <div id="t-needs"></div>
+    <details class="desc"><summary>Description</summary><pre id="t-desc"></pre></details>
+    <h2>Timeline</h2>
+    <ol class="timeline" id="t-events"></ol>
+  </section>
+
+  <section id="empty" class="panel empty">
+    <h1>No ticket selected</h1>
+    <p class="muted">Create a ticket and watch it go from readiness to a deployed change.</p>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

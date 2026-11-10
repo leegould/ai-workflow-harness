@@ -1,0 +1,135 @@
+// Harness UI: polls the API and renders the ticket list and the selected
+// ticket. No framework: the page is small enough not to need one.
+const STEPS = ["readiness", "build", "ci", "review", "risk", "merge", "deploy", "smoke"];
+const STEP_LABEL = { readiness: "Readiness", build: "Build", ci: "CI", review: "Review", risk: "Risk gate",
+  merge: "Merge", deploy: "Deploy", smoke: "Smoke test", resume: "Resume" };
+const ACTION_LABEL = { answer: "Send answer", approve: "Approve and merge", retry: "Retry with guidance",
+  takeover: "Take over", resume: "Resume", abandon: "Abandon" };
+const WAIT_TITLE = { questions: "The readiness check has questions", escalated: "Escalated: it needs your decision",
+  approval: "Needs your approval to merge", takeover: "You've taken this over", error: "A step keeps failing" };
+
+const $ = (id) => document.getElementById(id);
+let selected = location.hash.slice(1) || null;
+let shownWait = null; // which wait card is rendered, so polling doesn't wipe a half-typed comment
+
+async function api(path, opts) {
+  const res = await fetch(path, opts && { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(opts) });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+function el(tag, attrs = {}, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  }
+  n.append(...children.filter((c) => c != null && c !== false));
+  return n;
+}
+
+const dotClass = (t) => (t.status === "waiting" && t.wait === "error" ? "error" : t.status);
+const ago = (iso) => {
+  const s = Math.round((Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return new Date(iso).toLocaleString();
+};
+const statusText = (t) => {
+  if (t.status === "waiting") return "Needs you";
+  if (t.status === "done") return "Deployed";
+  if (t.status === "abandoned") return "Abandoned";
+  return `${STEP_LABEL[t.step] || t.step}${t.status === "running" ? "…" : ""}`;
+};
+
+async function refreshList() {
+  const tickets = await api("/api/tickets");
+  $("tickets").replaceChildren(...tickets.map((t) => el("a", { href: `#${t.id}`, class: t.id === selected ? "active" : "" },
+    el("div", { class: "t-title" }, el("span", { class: `dot ${dotClass(t)}` }), t.title),
+    el("div", { class: `t-sub ${t.status === "waiting" ? "needs" : ""}` }, `${t.id} · ${statusText(t)}`))));
+}
+
+async function refreshTicket() {
+  if (!selected) return show("empty");
+  let data;
+  try { data = await api(`/api/tickets/${selected}`); } catch { return show("empty"); }
+  const { ticket: t, events, actions } = data;
+  show("ticket");
+  $("t-id").textContent = t.id;
+  $("t-title").textContent = t.title;
+  const pill = $("t-status");
+  pill.textContent = statusText(t);
+  pill.className = `pill ${t.status}`;
+  $("t-desc").textContent = t.description || "(no description)";
+
+  const meta = [];
+  if (t.branch) meta.push(el("span", { class: "mono" }, t.branch));
+  if (t.builds) meta.push(el("span", {}, `${t.builds} build${t.builds > 1 ? "s" : ""}`));
+  if (t.risk) meta.push(el("span", {}, `risk ${t.risk}`));
+  meta.push(el("span", {}, `$${t.costUSD.toFixed(2)} agent spend`));
+  if (t.status === "done") meta.push(el("a", { href: "/poster", target: "_blank" }, "Open the deployed poster ↗"));
+  $("t-meta").replaceChildren(...meta);
+
+  const cur = STEPS.indexOf(t.step === "resume" ? "ci" : t.step);
+  $("t-steps").replaceChildren(...STEPS.map((s, i) => {
+    let cls = i < cur || t.status === "done" ? "done" : "";
+    if (i === cur && t.status !== "done") cls = `current ${t.status === "waiting" ? "waiting" : ""}`;
+    const label = s === "build" && t.round ? `${STEP_LABEL[s]} · round ${t.round}` : STEP_LABEL[s];
+    return el("li", { class: cls }, label);
+  }));
+
+  renderNeeds(t, actions || []);
+
+  $("t-events").replaceChildren(...events.map((e) => el("li", { class: e.kind },
+    el("div", { class: "ev-head" },
+      el("span", { class: "ev-step" }, STEP_LABEL[e.step] || e.step),
+      el("span", {}, e.message),
+      e.costUSD ? el("span", { class: "ev-cost" }, `$${e.costUSD.toFixed(3)}`) : null,
+      el("span", { class: "ev-time", title: new Date(e.at).toLocaleString() }, ago(e.at))),
+    e.detail ? el("details", { class: "ev-detail" }, el("summary", {}, "Details"), el("pre", {}, e.detail)) : null)));
+}
+
+function renderNeeds(t, actions) {
+  const key = actions.length ? `${t.id}:${t.wait}:${t.updated}` : null;
+  if (key === shownWait) return;
+  shownWait = key;
+  if (!key) return $("t-needs").replaceChildren();
+  const comment = el("textarea", { rows: 3, placeholder: t.wait === "questions" ? "Your answers" : "Optional guidance for the builder" });
+  const err = el("span", { class: "error" });
+  const needsComment = actions.some((a) => a === "answer" || a === "retry");
+  const buttons = actions.map((a) => el("button", { class: a === actions[0] ? "primary" : "", onclick: async () => {
+    if (a === "abandon" && !confirm(`Abandon ${t.id}?`)) return;
+    try { await api(`/api/tickets/${t.id}/actions`, { action: a, comment: comment.value }); shownWait = null; tick(); }
+    catch (e) { err.textContent = e.message; }
+  } }, a === "retry" && t.wait === "error" ? "Retry step" : ACTION_LABEL[a]));
+  $("t-needs").replaceChildren(el("div", { class: `needs ${t.wait === "error" ? "error-wait" : ""}` },
+    el("h3", {}, WAIT_TITLE[t.wait] || "Needs you"),
+    el("pre", {}, t.waitText || ""),
+    needsComment ? comment : null,
+    el("div", { class: "row" }, ...buttons, err)));
+}
+
+function show(id) {
+  for (const s of ["create", "ticket", "empty"]) $(s).hidden = s !== id;
+}
+
+async function tick() {
+  try { await Promise.all([refreshList(), $("create").hidden ? refreshTicket() : null]); } catch (e) { console.error(e); }
+}
+
+$("new-ticket").addEventListener("click", () => { selected = null; history.replaceState(null, "", "#"); show("create"); refreshList(); $("create-form").elements.title.focus(); });
+$("create-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  try {
+    // f.elements, not f.title: a form's .title is its own title attribute.
+    const t = await api("/api/tickets", { title: f.elements.title.value, description: f.elements.description.value });
+    f.reset();
+    $("create-error").textContent = "";
+    location.hash = t.id;
+  } catch (e) { $("create-error").textContent = e.message; }
+});
+window.addEventListener("hashchange", () => { selected = location.hash.slice(1) || null; shownWait = null; if (selected) show("ticket"); tick(); });
+
+tick();
+setInterval(tick, 2000);

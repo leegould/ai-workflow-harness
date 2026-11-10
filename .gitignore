@@ -1,0 +1,4 @@
+.harness/
+coverage.out
+.DS_Store
+/harness-bin

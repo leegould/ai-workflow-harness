@@ -1,0 +1,22 @@
+# The rules the harness enforces. Code reads this file; agents never see it, so
+# they can't argue with a gate or edit it. Changes here go through review.
+
+# Build rounds (each round is build, then CI, then review) before it escalates.
+max_rounds: 3
+
+# The deterministic risk floor. The highest matching level wins. Low merges
+# automatically; medium and high wait for a human to approve. An LLM risk note
+# may raise the level later, but never lower it below this.
+risk:
+  medium_lines: 150 # total lines added + deleted
+  high_lines: 400
+  rules:
+    - paths: [CLAUDE.md, "*.md"]
+      level: high
+      why: changes the rules or docs agents work from
+    - paths: [go.mod, go.sum]
+      level: high
+      why: adds or changes dependencies
+    - paths: [main.go]
+      level: medium
+      why: the CLI flags the deploy smoke test depends on
