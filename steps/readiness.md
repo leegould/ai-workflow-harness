@@ -37,7 +37,9 @@ the codebase. Those are not blockers. Only ask what would make the build agent
 guess at something that matters, where a wrong guess means rework. A choice that
 changes what the author will see or get when it's done (is the new thing
 switched on, does the default change, what replaces what) always matters: ask
-rather than assume.
+rather than assume. Never call such a choice "small" or "reversible" to justify
+skipping the question; if the ticket doesn't say whether the new thing is applied
+or merely made available, ask.
 
 List any calls you did make for the author under assumptions, so they're shown
 to them rather than buried.
