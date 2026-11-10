@@ -10,6 +10,7 @@
 <aside class="sidebar">
   <div class="brand">Harness</div>
   <button class="new" id="new-ticket">+ New ticket</button>
+  <a class="improve-link" id="improve-link" href="#improvements">Improvements <span class="count" id="improve-count"></span></a>
   <nav id="tickets" aria-label="Tickets"></nav>
 </aside>
 
@@ -38,6 +39,13 @@
     <details class="desc"><summary>Description</summary><pre id="t-desc"></pre></details>
     <h2>Timeline</h2>
     <ol class="timeline" id="t-events"></ol>
+  </section>
+
+  <section id="improvements" class="panel" hidden>
+    <h1>Improvements</h1>
+    <p class="muted">After each ticket, a retro reads its timeline and may propose edits to the readiness or build prompts. Nothing changes until you apply it. Tools, permissions, budgets and pipeline.yaml are never editable this way.</p>
+    <div class="stats" id="stats"></div>
+    <div id="proposals"></div>
   </section>
 
   <section id="empty" class="panel empty">

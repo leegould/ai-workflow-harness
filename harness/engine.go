@@ -93,6 +93,10 @@ func (e *Engine) work(ctx context.Context) {
 	defer tick.Stop()
 	for ctx.Err() == nil {
 		ran, err := e.RunOnce(ctx)
+		if err == nil && !ran {
+			// Retros only run when no ticket is waiting for a step.
+			ran, err = e.RetroOnce(ctx)
+		}
 		if err != nil {
 			log.Printf("engine: %v", err)
 		}
@@ -226,6 +230,7 @@ func (e *Engine) readiness(ctx context.Context, t *Ticket) error {
 		return err
 	}
 	t.CostUSD += cost
+	t.Questions += len(rd.Questions)
 	if rd.Ready {
 		e.costEvent(ctx, t, "agent", "Ready to build", rd.Reason, cost)
 		e.next(t, StepBuild)
@@ -364,6 +369,7 @@ func (e *Engine) smoke(ctx context.Context, t *Ticket) error {
 		e.event(ctx, t, "check", "Smoke test passed", res.Log)
 		t.Status = Done
 		t.Outcome = "deployed"
+		t.Retro = RetroPending
 		return nil
 	}
 	reverted, err := e.Repo.Revert(ctx, t.Merged)
@@ -440,6 +446,7 @@ func (e *Engine) Act(ctx context.Context, id string, a Action, comment string) (
 	case ActionAbandon:
 		t.Status = Abandoned
 		t.Outcome = "abandoned"
+		t.Retro = RetroPending
 	}
 	if t.Status != Waiting {
 		t.Wait, t.WaitText = "", ""

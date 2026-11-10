@@ -87,6 +87,9 @@ type Ticket struct {
 	Deployed string  `json:"deployed,omitempty"`
 	CostUSD  float64 `json:"costUSD"`
 
+	Questions int    `json:"questions"`       // questions readiness asked, in total
+	Retro     string `json:"retro,omitempty"` // pending once finished; see RetroOnce
+
 	NotBefore time.Time `json:"notBefore"`
 	Created   time.Time `json:"created"`
 	Updated   time.Time `json:"updated"`

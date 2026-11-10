@@ -53,6 +53,29 @@ reason.
 | Merge, deploy, smoke, revert | Local git and go against the stand-in repo and a deploy folder |
 | Review | Stub: approves unless the ticket says `never-approve` |
 
+## Improving the process: retros
+
+After each ticket ends (deployed or abandoned), a **retro** agent reads its timeline and
+the current readiness and build prompts, and may propose up to two edits, with the
+evidence. Proposals wait under **Improvements** in the sidebar, with the diff and
+**Apply** or **Dismiss**. Applying one edits the step file, so it shows up as a normal git
+change to review and commit.
+
+The guardrails are code, not instructions to the retro:
+- Only the prompt text of `readiness` and `build` can change. Never a step's frontmatter
+  (model, tools, permissions, budget), never `pipeline.yaml`, and never the retro's own
+  prompt.
+- The text being replaced must appear exactly once, and the edited step must still load.
+  Otherwise the proposal is discarded and the timeline says why.
+- A proposal is re-checked when applied. If the file changed in between, it's marked
+  stale rather than applied blindly.
+- A failing retro is noted on the timeline and never changes the ticket's outcome.
+
+The Improvements page shows questions asked per ticket, build rounds and agent spend, so
+you can see whether an applied change helped. The retro is told that most tickets need no
+change. On its first real run (a vague "make it orange" ticket), it judged three questions
+reasonable and proposed nothing.
+
 ## Design
 
 - **One program, state in SQLite.** Each ticket is a JSON document. The engine runs one
@@ -78,6 +101,7 @@ harness/           engine (steps and gates), store (SQLite), config (risk floor)
 agent/             step files → prompt → Runner (Claude Code CLI today)
 target/            local stand-in for GitHub, CI and deploy
 steps/             agent step definitions: model, tools, permissions, budget, schema, prompt
+                   (readiness, build, and retro, which proposes edits to the first two)
 pipeline.yaml      the rules: round cap and risk floor
 sample/poster      the toy app tickets change
 ```
@@ -96,6 +120,8 @@ sample/poster      the toy app tickets change
 ## Next
 
 - A real review agent, with the target's CLAUDE.md as its rubric.
+- Retros across several tickets: only propose a change when a pattern repeats.
+- Stats before and after each applied proposal, to show whether it helped.
 - An LLM risk note that can raise the floor but never lower it.
 - Gates per step in `pipeline.yaml`, e.g. skip review for docs-only changes, or call out
   to a service or a person before a step runs.

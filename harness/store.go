@@ -50,7 +50,7 @@ func Open(path string) (*Store, error) {
 	// One connection: SQLite allows one writer anyway, and it keeps :memory:
 	// databases from vanishing between connections.
 	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(context.Background(), schema); err != nil {
+	if _, err := db.ExecContext(context.Background(), schema+proposalSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
@@ -200,6 +200,11 @@ func (s *Store) Recover(ctx context.Context) (int, error) {
 		if err := s.Save(ctx, t); err != nil {
 			return 0, err
 		}
+	}
+	// A retro cut off mid-run just runs again.
+	if _, err := s.db.ExecContext(ctx, `UPDATE tickets SET data = json_set(data, '$.retro', ?) WHERE json_extract(data, '$.retro') = ?`,
+		RetroPending, RetroRunning); err != nil {
+		return 0, fmt.Errorf("recover retros: %w", err)
 	}
 	return len(stuck), nil
 }

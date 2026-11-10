@@ -43,14 +43,44 @@ const statusText = (t) => {
 };
 
 async function refreshList() {
-  const tickets = await api("/api/tickets");
+  const [tickets, stats] = await Promise.all([api("/api/tickets"), api("/api/stats")]);
+  $("improve-count").textContent = stats.openProposals || "";
+  $("improve-link").classList.toggle("active", selected === "improvements");
   $("tickets").replaceChildren(...tickets.map((t) => el("a", { href: `#${t.id}`, class: t.id === selected ? "active" : "" },
     el("div", { class: "t-title" }, el("span", { class: `dot ${dotClass(t)}` }), t.title),
     el("div", { class: `t-sub ${t.status === "waiting" ? "needs" : ""}` }, `${t.id} · ${statusText(t)}`))));
 }
 
+async function refreshImprovements() {
+  const [stats, proposals] = await Promise.all([api("/api/stats"), api("/api/proposals")]);
+  const stat = (v, label) => el("div", { class: "stat" }, el("b", {}, v), el("span", {}, label));
+  $("stats").replaceChildren(
+    stat(`${stats.deployed}/${stats.finished}`, "tickets deployed"),
+    stat(stats.avgQuestions.toFixed(1), "questions asked per ticket"),
+    stat(stats.avgBuilds.toFixed(1), "build rounds per ticket"),
+    stat(`$${stats.avgCostUSD.toFixed(2)}`, "agent spend per ticket"));
+  if (!proposals.length) {
+    return $("proposals").replaceChildren(el("p", { class: "muted" }, "No proposals yet. They appear here after tickets finish."));
+  }
+  $("proposals").replaceChildren(...proposals.map((p) => {
+    const err = el("span", { class: "error" });
+    const decide = (action) => async () => {
+      try { await api(`/api/proposals/${p.id}`, { action }); tick(); } catch (e) { err.textContent = e.message; tick(); }
+    };
+    return el("div", { class: `proposal ${p.status}` },
+      el("h3", {}, `${p.id}: change the ${p.step} prompt`, el("span", { class: "state" }, p.status),
+        el("a", { href: `#${p.ticket}`, class: "muted" }, `from ${p.ticket}`)),
+      el("p", { class: "why" }, p.why),
+      el("div", { class: "diff" }, el("div", { class: "del" }, `- ${p.find}`), el("div", { class: "add" }, `+ ${p.replace}`)),
+      p.status === "open" ? el("div", { class: "row" },
+        el("button", { class: "primary", onclick: decide("apply") }, "Apply"),
+        el("button", { onclick: decide("dismiss") }, "Dismiss"), err) : null);
+  }));
+}
+
 async function refreshTicket() {
   if (!selected) return show("empty");
+  if (selected === "improvements") { show("improvements"); return refreshImprovements(); }
   let data;
   try { data = await api(`/api/tickets/${selected}`); } catch { return show("empty"); }
   const { ticket: t, events, actions } = data;
@@ -110,7 +140,7 @@ function renderNeeds(t, actions) {
 }
 
 function show(id) {
-  for (const s of ["create", "ticket", "empty"]) $(s).hidden = s !== id;
+  for (const s of ["create", "ticket", "improvements", "empty"]) $(s).hidden = s !== id;
 }
 
 async function tick() {
@@ -129,7 +159,12 @@ $("create-form").addEventListener("submit", async (ev) => {
     location.hash = t.id;
   } catch (e) { $("create-error").textContent = e.message; }
 });
-window.addEventListener("hashchange", () => { selected = location.hash.slice(1) || null; shownWait = null; if (selected) show("ticket"); tick(); });
+window.addEventListener("hashchange", () => {
+  selected = location.hash.slice(1) || null;
+  shownWait = null;
+  if (selected) show(selected === "improvements" ? "improvements" : "ticket");
+  tick();
+});
 
 tick();
 setInterval(tick, 2000);

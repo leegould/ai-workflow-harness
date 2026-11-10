@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +27,9 @@ func (f fakeAgent) Run(_ context.Context, step agent.StepDef, prompt, _ string) 
 		return agent.AgentResult{}, f.fail
 	}
 	var v any = map[string]string{"summary": "did the thing"}
+	if step.Name == "retro" {
+		v = fakeRetro(prompt)
+	}
 	if step.Name == "readiness" {
 		rd := readiness{Ready: true, Reason: "clear"}
 		if strings.Contains(prompt, "THIN") && !strings.Contains(prompt, "Answers:") {
@@ -109,8 +114,13 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A copy, because applying a retro proposal really edits the step files.
+	steps := t.TempDir()
+	if err := os.CopyFS(steps, os.DirFS("../steps")); err != nil {
+		t.Fatal(err)
+	}
 	h := &harness{t: t, repo: &fakeRepo{}, clock: time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)}
-	h.e = &Engine{Store: store, Repo: h.repo, Runner: fakeAgent{}, StepsDir: "../steps", Config: cfg,
+	h.e = &Engine{Store: store, Repo: h.repo, Runner: fakeAgent{}, StepsDir: steps, Config: cfg,
 		Now: func() time.Time { return h.clock }}
 	return h
 }
@@ -338,4 +348,160 @@ func TestRunStopsWithContext(t *testing.T) {
 	}
 	tk, _ := h.e.Store.Get(context.Background(), id)
 	expectDeployed(t, tk)
+}
+
+// fakeRetro proposes nothing, unless the ticket says PROPOSE: then two valid
+// edits to the same sentence, one to a step it may not edit, and one whose
+// text isn't in the prompt.
+func fakeRetro(prompt string) any {
+	type proposal struct{ Step, Find, Replace, Why string }
+	out := struct {
+		Notes     string     `json:"notes"`
+		Proposals []proposal `json:"proposals"`
+	}{Notes: "went fine", Proposals: []proposal{}}
+	if strings.Contains(prompt, "PROPOSE") {
+		out.Proposals = []proposal{
+			{"readiness", "ask at most 3 questions", "ask at most 1 question", "only one was answered"},
+			{"readiness", "ask at most 3 questions", "ask at most 2 questions", "a gentler version"},
+			{"retro", "Most tickets need no change.", "Always propose.", "self-edit"},
+			{"build", "no such sentence", "x", "made up"},
+		}
+	}
+	return out
+}
+
+func TestRetroProposesAndAHumanApplies(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	id := h.create("Add a dark theme PROPOSE")
+	expectDeployed(t, h.drain(id))
+	if ran, err := h.e.RetroOnce(ctx); err != nil || !ran {
+		t.Fatalf("retro: %v %v", ran, err)
+	}
+	if ran, _ := h.e.RetroOnce(ctx); ran {
+		t.Fatal("retro ran twice")
+	}
+	ps, err := h.e.Store.Proposals(ctx)
+	if err != nil || len(ps) != 2 {
+		t.Fatalf("want 2 proposals kept (2 discarded), got %d %v", len(ps), err)
+	}
+	stats, err := h.e.Stats(ctx)
+	if err != nil || stats.OpenProposals != 2 || stats.Finished != 1 {
+		t.Fatalf("stats %+v %v", stats, err)
+	}
+
+	// Apply the first; the second edits the same sentence, so it's now stale.
+	first, second := ps[1], ps[0] // newest first
+	if _, err := h.e.Decide(ctx, first.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(filepath.Join(h.e.StepsDir, "readiness.md")) //nolint:gosec // test copy
+	if !strings.Contains(string(body), "ask at most 1 question") {
+		t.Fatal("proposal not applied to the step file")
+	}
+	if _, err := h.e.Decide(ctx, second.ID, true); !errors.Is(err, ErrProposalClosed) {
+		t.Fatalf("stale proposal: got %v", err)
+	}
+	if _, err := h.e.Decide(ctx, first.ID, false); !errors.Is(err, ErrProposalClosed) {
+		t.Fatalf("deciding twice: got %v", err)
+	}
+	evs, _ := h.e.Store.Events(ctx, id)
+	discarded := 0
+	for _, ev := range evs {
+		if strings.Contains(ev.Message, "discarded") {
+			discarded++
+		}
+	}
+	if discarded != 2 {
+		t.Fatalf("want 2 discarded proposals on the timeline, got %d", discarded)
+	}
+}
+
+func TestAbandonedTicketsGetARetroToo(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.repo.ci = func(int) bool { return false }
+	id := h.create("Add a dark theme")
+	expectWaiting(t, h.drain(id), WaitEscalated)
+	h.act(id, ActionAbandon, "")
+	if ran, err := h.e.RetroOnce(ctx); err != nil || !ran {
+		t.Fatalf("retro: %v %v", ran, err)
+	}
+	tk, _ := h.e.Store.Get(ctx, id)
+	if tk.Retro != RetroDone {
+		t.Fatalf("retro %q", tk.Retro)
+	}
+}
+
+// A failing retro is noted and never changes the ticket's outcome.
+func TestRetroFailureLeavesTheOutcomeAlone(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	id := h.create("Add a dark theme")
+	expectDeployed(t, h.drain(id))
+	h.e.Runner = fakeAgent{fail: errors.New("rate limited")}
+	if _, err := h.e.RetroOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tk, _ := h.e.Store.Get(ctx, id)
+	if tk.Retro != RetroFailed || tk.Outcome != "deployed" {
+		t.Fatalf("got retro %q outcome %q", tk.Retro, tk.Outcome)
+	}
+}
+
+func TestRecoverRequeuesAnInterruptedRetro(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	id := h.create("Add a dark theme")
+	expectDeployed(t, h.drain(id))
+	if _, ok, err := h.e.Store.ClaimRetro(ctx); err != nil || !ok {
+		t.Fatalf("claim retro: %v %v", ok, err)
+	}
+	if _, err := h.e.Store.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ran, err := h.e.RetroOnce(ctx); err != nil || !ran {
+		t.Fatalf("retro after recover: %v %v", ran, err)
+	}
+}
+
+func TestThinTicketCountsQuestions(t *testing.T) {
+	h := newHarness(t)
+	id := h.create("make it THIN")
+	h.drain(id)
+	h.act(id, ActionAnswer, "blue")
+	if tk := h.drain(id); tk.Questions != 1 {
+		t.Fatalf("questions %d", tk.Questions)
+	}
+}
+
+// Two workers must never run the same retro (this happened live before
+// claiming was a transaction).
+func TestRetroClaimedOnce(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	id := h.create("Add a dark theme")
+	expectDeployed(t, h.drain(id))
+	ran := make(chan bool, 8)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			ok, err := h.e.RetroOnce(ctx)
+			if err != nil {
+				t.Error(err)
+			}
+			ran <- ok
+		})
+	}
+	wg.Wait()
+	close(ran)
+	n := 0
+	for ok := range ran {
+		if ok {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("retro ran %d times", n)
+	}
 }

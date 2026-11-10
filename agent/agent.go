@@ -33,17 +33,29 @@ type StepDef struct {
 }
 
 func LoadStep(dir, name string) (StepDef, error) {
+	raw, err := readStep(dir, name)
+	if err != nil {
+		return StepDef{}, err
+	}
+	return parseStep(name, raw)
+}
+
+func readStep(dir, name string) (string, error) {
 	// os.Root confines reads to dir, so a step name can't reach outside it.
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return StepDef{}, fmt.Errorf("open steps dir: %w", err)
+		return "", fmt.Errorf("open steps dir: %w", err)
 	}
 	defer root.Close()
 	raw, err := root.ReadFile(name + ".md")
 	if err != nil {
-		return StepDef{}, fmt.Errorf("load step %s: %w", name, err)
+		return "", fmt.Errorf("load step %s: %w", name, err)
 	}
-	front, body, ok := splitFrontmatter(string(raw))
+	return string(raw), nil
+}
+
+func parseStep(name, raw string) (StepDef, error) {
+	front, body, ok := splitFrontmatter(raw)
 	if !ok {
 		return StepDef{}, fmt.Errorf("step %s: missing --- frontmatter", name)
 	}
@@ -54,6 +66,7 @@ func LoadStep(dir, name string) (StepDef, error) {
 	if s.Runner == "" || s.Model == "" {
 		return StepDef{}, fmt.Errorf("step %s: runner and model are required", name)
 	}
+	var err error
 	s.prompt, err = template.New(name).Option("missingkey=error").Parse(body)
 	if err != nil {
 		return StepDef{}, fmt.Errorf("step %s prompt: %w", name, err)

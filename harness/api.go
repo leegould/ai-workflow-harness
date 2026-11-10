@@ -82,6 +82,38 @@ func Server(e *Engine, posterPage string) http.Handler {
 		reply(w, http.StatusOK, t)
 	})
 
+	mux.HandleFunc("GET /api/proposals", func(w http.ResponseWriter, r *http.Request) {
+		ps, err := e.Store.Proposals(r.Context())
+		if err != nil {
+			fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		reply(w, http.StatusOK, ps)
+	})
+
+	mux.HandleFunc("POST /api/proposals/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Action string }
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || (in.Action != "apply" && in.Action != "dismiss") {
+			fail(w, http.StatusBadRequest, errors.New(`action must be "apply" or "dismiss"`))
+			return
+		}
+		p, err := e.Decide(r.Context(), r.PathValue("id"), in.Action == "apply")
+		if err != nil {
+			fail(w, status(err), err)
+			return
+		}
+		reply(w, http.StatusOK, p)
+	})
+
+	mux.HandleFunc("GET /api/stats", func(w http.ResponseWriter, r *http.Request) {
+		s, err := e.Stats(r.Context())
+		if err != nil {
+			fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		reply(w, http.StatusOK, s)
+	})
+
 	mux.HandleFunc("GET /poster", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(posterPage); err != nil {
 			http.Error(w, "Nothing deployed yet.", http.StatusNotFound)
@@ -96,7 +128,7 @@ func status(err error) int {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, ErrInvalidAction):
+	case errors.Is(err, ErrInvalidAction), errors.Is(err, ErrProposalClosed):
 		return http.StatusConflict
 	}
 	return http.StatusInternalServerError

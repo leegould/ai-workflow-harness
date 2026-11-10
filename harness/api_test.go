@@ -59,6 +59,18 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("answer: %d", code)
 	}
 
+	for _, path := range []string{"/api/proposals", "/api/stats"} {
+		if code, _ := call(t, srv, "GET", path, ""); code != http.StatusOK {
+			t.Fatalf("%s: %d", path, code)
+		}
+	}
+	if code, _ := call(t, srv, "POST", "/api/proposals/P-1", `{"action":"maybe"}`); code != http.StatusBadRequest {
+		t.Fatalf("bad proposal action: %d", code)
+	}
+	if code, _ := call(t, srv, "POST", "/api/proposals/P-9", `{"action":"apply"}`); code != http.StatusNotFound {
+		t.Fatalf("missing proposal: %d", code)
+	}
+
 	if code, _ := call(t, srv, "GET", "/poster", ""); code != http.StatusNotFound {
 		t.Fatalf("poster before deploy: %d", code)
 	}
