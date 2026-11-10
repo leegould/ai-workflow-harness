@@ -11,6 +11,8 @@ const WAIT_TITLE = { questions: "The readiness check has questions", escalated: 
 const $ = (id) => document.getElementById(id);
 let selected = location.hash.slice(1) || null;
 let shownWait = null; // which wait card is rendered, so polling doesn't wipe a half-typed comment
+let shownVerdict = null; // same for the feedback card
+const openDetails = new Set(); // timeline entries the user expanded, kept open across polls
 
 async function api(path, opts) {
   const res = await fetch(path, opts && { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(opts) });
@@ -56,6 +58,7 @@ async function refreshImprovements() {
   const stat = (v, label) => el("div", { class: "stat" }, el("b", {}, v), el("span", {}, label));
   $("stats").replaceChildren(
     stat(`${stats.deployed}/${stats.finished}`, "tickets deployed"),
+    stat(stats.rated ? `${stats.wanted}/${stats.rated}` : "–", "did what you wanted (of those rated)"),
     stat(stats.avgQuestions.toFixed(1), "questions asked per ticket"),
     stat(stats.avgBuilds.toFixed(1), "build rounds per ticket"),
     stat(`$${stats.avgCostUSD.toFixed(2)}`, "agent spend per ticket"));
@@ -109,6 +112,8 @@ async function refreshTicket() {
   }));
 
   renderNeeds(t, actions || []);
+  renderVerdict(t);
+  renderAssumptions(t);
 
   $("t-events").replaceChildren(...events.map((e) => el("li", { class: e.kind },
     el("div", { class: "ev-head" },
@@ -116,7 +121,51 @@ async function refreshTicket() {
       el("span", {}, e.message),
       e.costUSD ? el("span", { class: "ev-cost" }, `$${e.costUSD.toFixed(3)}`) : null,
       el("span", { class: "ev-time", title: new Date(e.at).toLocaleString() }, ago(e.at))),
-    e.detail ? el("details", { class: "ev-detail" }, el("summary", {}, "Details"), el("pre", {}, e.detail)) : null)));
+    e.detail ? details(e) : null)));
+}
+
+// The timeline is rebuilt on every poll, so remember which entries are open.
+function details(e) {
+  const d = el("details", { class: "ev-detail" }, el("summary", {}, "Details"), el("pre", {}, e.detail));
+  d.open = openDetails.has(e.id);
+  d.addEventListener("toggle", () => (d.open ? openDetails.add(e.id) : openDetails.delete(e.id)));
+  return d;
+}
+
+function renderAssumptions(t) {
+  const as = t.assumptions || [];
+  if (!as.length) return $("t-assumptions").replaceChildren();
+  $("t-assumptions").replaceChildren(el("div", { class: "assumptions" },
+    el("h3", {}, "Decisions made for you"),
+    el("ul", {}, ...as.map((a) => el("li", {}, el("span", { class: "from" }, STEP_LABEL[a.step] || a.step), a.text)))));
+}
+
+function renderVerdict(t) {
+  const finished = t.status === "done" || t.status === "abandoned";
+  const key = finished ? `${t.id}:${t.verdict || ""}:${t.retro || ""}` : null;
+  if (key === shownVerdict) return;
+  shownVerdict = key;
+  if (!finished) return $("t-verdict").replaceChildren();
+  const retro = { pending: "The retro will look at it shortly.", running: "The retro is looking at it now.",
+    done: "The retro has looked at it.", failed: "The retro failed; see the timeline." }[t.retro] || "";
+  if (t.verdict) {
+    return $("t-verdict").replaceChildren(el("div", { class: "verdict" },
+      el("p", { class: "said" }, `You said it ${t.verdict === "yes" ? "did" : "didn't do"} what you wanted`,
+        t.verdictComment ? `: "${t.verdictComment}"` : "", `. ${retro}`)));
+  }
+  const comment = el("textarea", { rows: 2, placeholder: "Optional: what was missing or wrong?" });
+  const err = el("span", { class: "error" });
+  const send = (good) => async () => {
+    try { await api(`/api/tickets/${t.id}/feedback`, { good, comment: comment.value }); shownVerdict = null; tick(); }
+    catch (e) { err.textContent = e.message; }
+  };
+  $("t-verdict").replaceChildren(el("div", { class: "verdict" },
+    el("h3", {}, "Did this do what you wanted?"),
+    comment,
+    el("div", { class: "row" },
+      el("button", { onclick: send(true) }, "👍 Yes"),
+      el("button", { onclick: send(false) }, "👎 No"),
+      el("span", { class: "muted" }, "Optional. It's the best evidence the retro gets."), err)));
 }
 
 function renderNeeds(t, actions) {
@@ -162,6 +211,7 @@ $("create-form").addEventListener("submit", async (ev) => {
 window.addEventListener("hashchange", () => {
   selected = location.hash.slice(1) || null;
   shownWait = null;
+  shownVerdict = null;
   if (selected) show(selected === "improvements" ? "improvements" : "ticket");
   tick();
 });

@@ -2,6 +2,7 @@ package harness
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -90,9 +91,32 @@ type Ticket struct {
 	Questions int    `json:"questions"`       // questions readiness asked, in total
 	Retro     string `json:"retro,omitempty"` // pending once finished; see RetroOnce
 
+	// Assumptions are calls the agents made for the author, shown on the
+	// ticket rather than buried in a summary.
+	Assumptions []Assumption `json:"assumptions,omitempty"`
+
+	// Verdict is the human's answer to "did this do what you wanted?":
+	// "yes", "no", or empty if they didn't say. The retro's best evidence.
+	Verdict        string `json:"verdict,omitempty"`
+	VerdictComment string `json:"verdictComment,omitempty"`
+
 	NotBefore time.Time `json:"notBefore"`
 	Created   time.Time `json:"created"`
 	Updated   time.Time `json:"updated"`
+}
+
+type Assumption struct {
+	Step Step   `json:"step"`
+	Text string `json:"text"`
+}
+
+// setAssumptions replaces the assumptions from one step: a new build round
+// restates its own, so they don't pile up.
+func (t *Ticket) setAssumptions(s Step, texts []string) {
+	t.Assumptions = slices.DeleteFunc(t.Assumptions, func(a Assumption) bool { return a.Step == s })
+	for _, text := range texts {
+		t.Assumptions = append(t.Assumptions, Assumption{Step: s, Text: text})
+	}
 }
 
 // Actions is what a human can do with the ticket right now.

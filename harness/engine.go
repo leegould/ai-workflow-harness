@@ -213,9 +213,10 @@ func (e *Engine) costEvent(ctx context.Context, t *Ticket, kind, message, detail
 // --- steps ---
 
 type readiness struct {
-	Ready     bool     `json:"ready"`
-	Reason    string   `json:"reason"`
-	Questions []string `json:"questions"`
+	Ready       bool     `json:"ready"`
+	Reason      string   `json:"reason"`
+	Questions   []string `json:"questions"`
+	Assumptions []string `json:"assumptions"`
 }
 
 // readiness judges the ticket against the code on main, read-only.
@@ -231,6 +232,7 @@ func (e *Engine) readiness(ctx context.Context, t *Ticket) error {
 	}
 	t.CostUSD += cost
 	t.Questions += len(rd.Questions)
+	t.setAssumptions(StepReadiness, rd.Assumptions)
 	if rd.Ready {
 		e.costEvent(ctx, t, "agent", "Ready to build", rd.Reason, cost)
 		e.next(t, StepBuild)
@@ -263,7 +265,8 @@ func (e *Engine) build(ctx context.Context, t *Ticket) error {
 		return fmt.Errorf("check out: %w", err)
 	}
 	var out struct {
-		Summary string `json:"summary"`
+		Summary     string   `json:"summary"`
+		Assumptions []string `json:"assumptions"`
 	}
 	cost, err := e.runAgent(ctx, "build", buildRequest{Ticket: *t, Branch: branch, Feedback: t.Feedback}, dir, &out)
 	if err != nil {
@@ -278,6 +281,7 @@ func (e *Engine) build(ctx context.Context, t *Ticket) error {
 	t.Branch = branch
 	t.SHA = sha
 	t.CostUSD += cost
+	t.setAssumptions(StepBuild, out.Assumptions)
 	e.costEvent(ctx, t, "agent", fmt.Sprintf("Round %d pushed %s to %s", t.Round, short(sha), branch), out.Summary, cost)
 	e.next(t, StepCI)
 	return nil

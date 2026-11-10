@@ -59,6 +59,17 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("answer: %d", code)
 	}
 
+	if code, _ := call(t, srv, "POST", "/api/tickets/T-1/feedback", `{"good":true}`); code != http.StatusConflict {
+		t.Fatalf("feedback before it finished: %d", code)
+	}
+	if code, _ := call(t, srv, "POST", "/api/tickets/T-1/feedback", `nope`); code != http.StatusBadRequest {
+		t.Fatalf("bad feedback: %d", code)
+	}
+	hn.drain("T-1")
+	if code, _ := call(t, srv, "POST", "/api/tickets/T-1/feedback", `{"good":true,"comment":"spot on"}`); code != http.StatusOK {
+		t.Fatalf("feedback: %d", code)
+	}
+
 	for _, path := range []string{"/api/proposals", "/api/stats"} {
 		if code, _ := call(t, srv, "GET", path, ""); code != http.StatusOK {
 			t.Fatalf("%s: %d", path, code)

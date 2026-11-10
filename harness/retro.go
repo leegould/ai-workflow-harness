@@ -258,11 +258,71 @@ func (e *Engine) Decide(ctx context.Context, id string, apply bool) (Proposal, e
 	return p, nil
 }
 
+// SetVerdict records whether a finished ticket did what the human wanted, and
+// queues its retro again so it learns from the answer. It's one transaction
+// with the retro claim, so a retro can't run on a stale copy and lose it.
+func (s *Store) SetVerdict(ctx context.Context, id string, good bool, comment string) (Ticket, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Ticket{}, fmt.Errorf("verdict: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var data string
+	err = tx.QueryRowContext(ctx, `SELECT data FROM tickets WHERE id = ?`, id).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Ticket{}, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	if err != nil {
+		return Ticket{}, fmt.Errorf("verdict: %w", err)
+	}
+	t, err := decode(data)
+	if err != nil {
+		return Ticket{}, err
+	}
+	switch {
+	case t.Status != Done && t.Status != Abandoned:
+		return t, fmt.Errorf("%w: %s hasn't finished yet", ErrInvalidAction, t.ID)
+	case t.Retro == RetroRunning:
+		return t, fmt.Errorf("%w: the retro for %s is running, try again in a moment", ErrInvalidAction, t.ID)
+	}
+	t.Verdict = "no"
+	if good {
+		t.Verdict = "yes"
+	}
+	t.VerdictComment = comment
+	t.Retro = RetroPending
+	if err := save(ctx, tx, t); err != nil {
+		return Ticket{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Ticket{}, fmt.Errorf("verdict: %w", err)
+	}
+	return t, nil
+}
+
+// Feedback records the human's verdict on a finished ticket.
+func (e *Engine) Feedback(ctx context.Context, id string, good bool, comment string) (Ticket, error) {
+	comment = strings.TrimSpace(comment)
+	t, err := e.Store.SetVerdict(ctx, id, good, comment)
+	if err != nil {
+		return t, err
+	}
+	msg := "You said it didn't do what you wanted"
+	if good {
+		msg = "You said it did what you wanted"
+	}
+	e.event(ctx, &t, "human", msg+"; the retro will take it into account", comment)
+	e.Wake()
+	return t, nil
+}
+
 // Stats summarises finished tickets, so a prompt change can be judged by
 // whether the numbers move: fewer questions, fewer rounds, less spend.
 type Stats struct {
 	Finished      int     `json:"finished"`
 	Deployed      int     `json:"deployed"`
+	Rated         int     `json:"rated"` // finished tickets with a verdict
+	Wanted        int     `json:"wanted"`
 	AvgQuestions  float64 `json:"avgQuestions"`
 	AvgBuilds     float64 `json:"avgBuilds"`
 	AvgCostUSD    float64 `json:"avgCostUSD"`
@@ -282,6 +342,12 @@ func (e *Engine) Stats(ctx context.Context) (Stats, error) {
 		s.Finished++
 		if t.Outcome == "deployed" {
 			s.Deployed++
+		}
+		if t.Verdict != "" {
+			s.Rated++
+			if t.Verdict == "yes" {
+				s.Wanted++
+			}
 		}
 		s.AvgQuestions += float64(t.Questions)
 		s.AvgBuilds += float64(t.Builds)

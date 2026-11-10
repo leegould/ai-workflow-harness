@@ -26,7 +26,7 @@ func (f fakeAgent) Run(_ context.Context, step agent.StepDef, prompt, _ string) 
 	if f.fail != nil {
 		return agent.AgentResult{}, f.fail
 	}
-	var v any = map[string]string{"summary": "did the thing"}
+	var v any = map[string]any{"summary": "did the thing", "assumptions": []string{"left poster.json as it was"}}
 	if step.Name == "retro" {
 		v = fakeRetro(prompt)
 	}
@@ -359,6 +359,9 @@ func fakeRetro(prompt string) any {
 		Notes     string     `json:"notes"`
 		Proposals []proposal `json:"proposals"`
 	}{Notes: "went fine", Proposals: []proposal{}}
+	if strings.Contains(prompt, "what the human wanted? no") {
+		out.Proposals = []proposal{{"readiness", "always matters: ask", "always matters: ask, and never switch it on silently", "the human said it didn't do what they wanted"}}
+	}
 	if strings.Contains(prompt, "PROPOSE") {
 		out.Proposals = []proposal{
 			{"readiness", "ask at most 3 questions", "ask at most 1 question", "only one was answered"},
@@ -503,5 +506,65 @@ func TestRetroClaimedOnce(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("retro ran %d times", n)
+	}
+}
+
+func TestAssumptionsAreRecordedPerStep(t *testing.T) {
+	h := newHarness(t)
+	h.repo.ci = func(n int) bool { return n > 1 }
+	tk := h.drain(h.create("Add a blue theme"))
+	expectDeployed(t, tk)
+	// Two build rounds, but the build's assumptions are restated, not doubled.
+	if tk.Builds != 2 || len(tk.Assumptions) != 1 || tk.Assumptions[0].Step != StepBuild {
+		t.Fatalf("got builds %d, assumptions %+v", tk.Builds, tk.Assumptions)
+	}
+}
+
+// "It didn't do what I wanted" reruns the retro with that verdict as evidence.
+func TestNegativeFeedbackDrivesARetroProposal(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	id := h.create("Add a blue theme")
+	expectDeployed(t, h.drain(id))
+	if ran, err := h.e.RetroOnce(ctx); err != nil || !ran {
+		t.Fatalf("first retro: %v %v", ran, err)
+	}
+	if ps, _ := h.e.Store.Proposals(ctx); len(ps) != 0 {
+		t.Fatalf("no verdict yet, want no proposals, got %d", len(ps))
+	}
+	if _, err := h.e.Feedback(ctx, id, false, "it added the theme but didn't switch to it"); err != nil {
+		t.Fatal(err)
+	}
+	if ran, err := h.e.RetroOnce(ctx); err != nil || !ran {
+		t.Fatalf("retro after feedback: %v %v", ran, err)
+	}
+	ps, err := h.e.Store.Proposals(ctx)
+	if err != nil || len(ps) != 1 || !strings.Contains(ps[0].Why, "didn't do what they wanted") {
+		t.Fatalf("got %+v %v", ps, err)
+	}
+	stats, _ := h.e.Stats(ctx)
+	if stats.Rated != 1 || stats.Wanted != 0 {
+		t.Fatalf("stats %+v", stats)
+	}
+}
+
+func TestFeedbackOnlyOnFinishedTicketsWithNoRetroRunning(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	id := h.create("make it THIN")
+	h.drain(id)
+	if _, err := h.e.Feedback(ctx, id, true, ""); !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("unfinished ticket: got %v", err)
+	}
+	h.act(id, ActionAnswer, "blue")
+	expectDeployed(t, h.drain(id))
+	if _, ok, err := h.e.Store.ClaimRetro(ctx); err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	if _, err := h.e.Feedback(ctx, id, true, ""); !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("retro running: got %v", err)
+	}
+	if _, err := h.e.Feedback(ctx, "T-99", true, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing ticket: got %v", err)
 	}
 }

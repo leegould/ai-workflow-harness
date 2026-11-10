@@ -71,6 +71,16 @@ The guardrails are code, not instructions to the retro:
   stale rather than applied blindly.
 - A failing retro is noted on the timeline and never changes the ticket's outcome.
 
+**Did it do what you wanted?** A finished ticket asks, optionally, with Yes or No and a
+comment. Your answer reruns the retro with it as the strongest evidence. Without it, the
+loop can only learn from process signals (questions, rounds, CI). A ticket can pass every
+gate and still miss the point: "Add a blue theme" added the theme but didn't switch the
+poster to it, and the retro called it a smooth ticket.
+
+**Decisions made for you.** Readiness and build list the calls they made where the ticket
+left something open. These show in their own box on the ticket, not buried in a summary.
+Readiness is told to ask, not assume, when a choice changes what the author will see or get.
+
 The Improvements page shows questions asked per ticket, build rounds and agent spend, so
 you can see whether an applied change helped. The retro is told that most tickets need no
 change. On its first real run (a vague "make it orange" ticket), it judged three questions

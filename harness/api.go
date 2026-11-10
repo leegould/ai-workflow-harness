@@ -82,6 +82,23 @@ func Server(e *Engine, posterPage string) http.Handler {
 		reply(w, http.StatusOK, t)
 	})
 
+	mux.HandleFunc("POST /api/tickets/{id}/feedback", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Good    bool
+			Comment string
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			fail(w, http.StatusBadRequest, err)
+			return
+		}
+		t, err := e.Feedback(r.Context(), r.PathValue("id"), in.Good, in.Comment)
+		if err != nil {
+			fail(w, status(err), err)
+			return
+		}
+		reply(w, http.StatusOK, t)
+	})
+
 	mux.HandleFunc("GET /api/proposals", func(w http.ResponseWriter, r *http.Request) {
 		ps, err := e.Store.Proposals(r.Context())
 		if err != nil {
