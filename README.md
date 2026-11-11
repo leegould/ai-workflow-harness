@@ -147,6 +147,16 @@ reasonable and proposed nothing.
 - **Every step writes events**, which are the ticket's timeline in the UI and its audit
   trail: agent summaries, CI logs, risk reasons, who decided what, cost.
 
+## Its own gates
+
+The harness's code goes through the gates it puts on the code it builds. Every commit
+runs `make check` on the staged files (`make hooks` installs the hook; GitHub Actions
+runs the same check on push). Its rules, meaning prompts, `pipeline.yaml`, `CLAUDE.md`,
+the checks and dependencies, can't be committed straight to main: they go on a branch, a
+human approves the diff, and a `--no-ff` merge brings them in. Locally that's a guard
+against accidents, since a hook can be skipped. On GitHub it would be branch protection
+with a required review.
+
 ## Layout
 
 ```

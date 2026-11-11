@@ -4,6 +4,11 @@ Read README.md first.
 
 - Commits run `make check` on the staged files (`make hooks` installs the hook). Never
   skip it with `--no-verify`: if it fails, fix the cause.
+- The harness's own rules are protected, as the target's are: `pipeline.yaml`, `steps/`,
+  `CLAUDE.md`, the checks (`.golangci.yml`, `Makefile`, `tools/`, `.githooks/`,
+  `.github/`) and dependencies (`go.mod`, `go.sum`). The hook refuses them on main. Put
+  the change on a branch, show the human the diff, and merge with `git merge --no-ff`
+  only after they approve.
 - Run `make check` before you finish and make it pass (lint, govulncheck, race tests,
   coverage). `make fmt` fixes formatting. Never weaken a gate: don't edit `.golangci.yml`,
   `Makefile`, `tools/go.mod` or `pipeline.yaml` unless that's the task.
