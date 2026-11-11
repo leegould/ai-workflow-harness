@@ -1,11 +1,11 @@
 // Harness UI: polls the API and renders the ticket list and the selected
 // ticket. No framework: the page is small enough not to need one.
-const STEPS = ["readiness", "build", "ci", "review", "risk", "merge", "deploy", "smoke"];
-const STEP_LABEL = { readiness: "Readiness", build: "Build", ci: "CI", review: "Review", risk: "Risk gate",
+const STEPS = ["readiness", "spec", "build", "ci", "review", "risk", "merge", "deploy", "smoke"];
+const STEP_LABEL = { readiness: "Readiness", spec: "Spec", build: "Build", ci: "CI", review: "Review", risk: "Risk gate",
   merge: "Merge", deploy: "Deploy", smoke: "Smoke test", resume: "Resume" };
-const ACTION_LABEL = { answer: "Send answer", approve: "Approve and merge", retry: "Retry with guidance",
+const ACTION_LABEL = { answer: "Send answer", approve: "Approve and merge", revise: "Ask for changes", retry: "Retry with guidance",
   takeover: "Take over", resume: "Resume", abandon: "Abandon" };
-const WAIT_TITLE = { questions: "The readiness check has questions", escalated: "Escalated: it needs your decision",
+const WAIT_TITLE = { questions: "The readiness check has questions", spec: "Check the spec before it's built", escalated: "Escalated: it needs your decision",
   approval: "Needs your approval to merge", takeover: "You've taken this over", error: "A step keeps failing" };
 
 const $ = (id) => document.getElementById(id);
@@ -97,6 +97,8 @@ async function refreshTicket() {
   pill.textContent = statusText(t);
   pill.className = `pill ${t.status}`;
   $("t-desc").textContent = t.description || "(no description)";
+  $("t-spec-box").hidden = !t.spec;
+  $("t-spec").textContent = t.spec || "";
 
   const meta = [];
   if (t.branch) meta.push(el("span", { class: "mono" }, t.branch));
@@ -176,19 +178,27 @@ function renderNeeds(t, actions) {
   if (key === shownWait) return;
   shownWait = key;
   if (!key) return $("t-needs").replaceChildren();
-  const comment = el("textarea", { rows: 3, placeholder: t.wait === "questions" ? "Your answers" : "Optional guidance for the builder" });
+  const placeholder = { questions: "Your answers", spec: "What should change in the spec? (needed to ask for changes)" }[t.wait];
+  const comment = el("textarea", { rows: 3, placeholder: placeholder || "Optional guidance for the builder" });
   const err = el("span", { class: "error" });
-  const needsComment = actions.some((a) => a === "answer" || a === "retry");
+  const needsComment = actions.some((a) => a === "answer" || a === "retry" || a === "revise");
   const buttons = actions.map((a) => el("button", { class: a === actions[0] ? "primary" : "", onclick: async () => {
     if (a === "abandon" && !confirm(`Abandon ${t.id}?`)) return;
     try { await api(`/api/tickets/${t.id}/actions`, { action: a, comment: comment.value }); shownWait = undefined; tick(); }
     catch (e) { err.textContent = e.message; }
-  } }, a === "retry" && t.wait === "error" ? "Retry step" : ACTION_LABEL[a]));
+  } }, label(t, a)));
   $("t-needs").replaceChildren(el("div", { class: `needs ${t.wait === "error" ? "error-wait" : ""}` },
     el("h3", {}, WAIT_TITLE[t.wait] || "Needs you"),
     el("pre", {}, t.waitText || ""),
+    t.wait === "spec" ? el("pre", { class: "spec" }, t.spec || "") : null,
     needsComment ? comment : null,
     el("div", { class: "row" }, ...buttons, err)));
+}
+
+function label(t, a) {
+  if (a === "retry" && t.wait === "error") return "Retry step";
+  if (a === "approve" && t.wait === "spec") return "Approve and build";
+  return ACTION_LABEL[a];
 }
 
 function show(id) {

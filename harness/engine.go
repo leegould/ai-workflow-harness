@@ -151,6 +151,8 @@ func (e *Engine) step(ctx context.Context, t *Ticket) error {
 	switch t.Step {
 	case StepReadiness:
 		return e.readiness(ctx, t)
+	case StepSpec:
+		return e.spec(ctx, t)
 	case StepBuild:
 		return e.build(ctx, t)
 	case StepCI:
@@ -235,7 +237,7 @@ func (e *Engine) readiness(ctx context.Context, t *Ticket) error {
 	t.setAssumptions(StepReadiness, rd.Assumptions)
 	if rd.Ready {
 		e.costEvent(ctx, t, "agent", "Ready to build", rd.Reason, cost)
-		e.next(t, StepBuild)
+		e.next(t, StepSpec)
 		return nil
 	}
 	e.costEvent(ctx, t, "agent", "Needs more detail", rd.Reason, cost)
@@ -252,6 +254,8 @@ type buildRequest struct {
 	Ticket   Ticket
 	Branch   string
 	Feedback string
+	Spec     string
+	SpecPath string
 }
 
 func (e *Engine) build(ctx context.Context, t *Ticket) error {
@@ -268,8 +272,12 @@ func (e *Engine) build(ctx context.Context, t *Ticket) error {
 		Summary     string   `json:"summary"`
 		Assumptions []string `json:"assumptions"`
 	}
-	cost, err := e.runAgent(ctx, "build", buildRequest{Ticket: *t, Branch: branch, Feedback: t.Feedback}, dir, &out)
+	req := buildRequest{Ticket: *t, Branch: branch, Feedback: t.Feedback, Spec: t.Spec, SpecPath: specPath(t.ID)}
+	cost, err := e.runAgent(ctx, "build", req, dir, &out)
 	if err != nil {
+		return err
+	}
+	if err := writeSpec(dir, t); err != nil {
 		return err
 	}
 	sha, err := e.Repo.CommitAndPush(ctx, dir, branch, fmt.Sprintf("%s: %s\n\n%s", t.ID, t.Title, out.Summary))
@@ -318,13 +326,24 @@ func (e *Engine) review(ctx context.Context, t *Ticket) error {
 	return nil
 }
 
-// risk applies the deterministic floor from pipeline.yaml: paths and size.
+// risk applies the deterministic floor from pipeline.yaml (paths and size),
+// then checks the change against the spec: touching files it didn't plan
+// makes it at least medium, because the build strayed from what was agreed.
 func (e *Engine) risk(ctx context.Context, t *Ticket) error {
-	changes, err := e.Repo.ChangedFiles(ctx, t.Branch)
+	all, err := e.Repo.ChangedFiles(ctx, t.Branch)
 	if err != nil {
 		return fmt.Errorf("list changed files: %w", err)
 	}
+	// The spec itself is the harness's own file, not a change to judge.
+	changes := slices.DeleteFunc(all, func(c target.FileChange) bool { return c.Path == specPath(t.ID) })
 	level, why := e.Config.Risk.Assess(changes)
+	if extra := unplanned(t.SpecFiles, changes); len(extra) > 0 {
+		if level == Low {
+			why = nil
+		}
+		level = max(level, Medium)
+		why = append(why, "medium: changed files the spec didn't plan: "+strings.Join(extra, ", "))
+	}
 	t.Risk = level.String()
 	var files strings.Builder
 	for _, c := range changes {
@@ -431,7 +450,17 @@ func (e *Engine) Act(ctx context.Context, id string, a Action, comment string) (
 		t.Description += "\n\nAnswers:\n" + comment
 		e.next(&t, StepReadiness)
 	case ActionApprove:
+		if t.Wait == WaitSpec {
+			e.next(&t, StepBuild)
+			break
+		}
 		e.next(&t, StepMerge)
+	case ActionRevise:
+		if comment == "" {
+			return t, fmt.Errorf("%w: say what should change in the spec", ErrInvalidAction)
+		}
+		t.Description += "\n\nSpec feedback:\n" + comment
+		e.next(&t, StepSpec)
 	case ActionRetry:
 		if t.Wait == WaitError {
 			e.next(&t, t.Step)

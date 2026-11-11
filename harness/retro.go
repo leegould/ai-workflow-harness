@@ -15,7 +15,7 @@ import (
 
 // Editable lists the steps whose prompts a retro may propose changes to. Not
 // the retro's own: an agent shouldn't rewrite its own instructions.
-var Editable = []string{"readiness", "build"}
+var Editable = []string{"readiness", "spec", "build"}
 
 var ErrProposalClosed = errors.New("proposal is no longer open")
 

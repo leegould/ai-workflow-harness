@@ -22,6 +22,9 @@ deployed poster.
 readiness ─ not ready ─▶ questions for a human ─▶ answers ─▶ readiness
     │ ready
     ▼
+spec ─ risky plan ─▶ human approves, or asks for changes ─▶ spec
+    │ low
+    ▼
 build ─▶ CI ─ fail ─▶ build (max 3 rounds, then escalate to a human)
            │ pass
            ▼
@@ -37,7 +40,7 @@ build ─▶ CI ─ fail ─▶ build (max 3 rounds, then escalate to a human)
                            deployed
 ```
 
-Human decisions: **answer**, **approve**, **retry** (with guidance), **take over** (you
+Human decisions: **answer**, **approve** (a spec or a merge), **revise** (a spec), **retry** (with guidance), **take over** (you
 push to the branch, then **resume**, and your work goes through CI, review and the risk
 gate too), **abandon**. An action that doesn't fit the current wait is rejected with a
 reason.
@@ -47,22 +50,50 @@ reason.
 | Step | |
 |---|---|
 | Readiness | Claude Code agent (`steps/readiness.md`), read-only (Read/Glob/Grep) in a checkout of main |
+| Spec | Claude Code agent (`steps/spec.md`), read-only in a checkout of main. Returns the spec as structured output; the harness renders it and commits it with the change |
 | Build | Claude Code agent (`steps/build.md`): edit tools plus `go test/vet/build/run` and `gofmt` only. The harness commits and pushes |
 | CI | The harness runs gofmt, vet and tests on the pushed commit itself, whatever the agent says it ran |
-| Risk gate | **Deterministic floor from `pipeline.yaml`:** paths (agent rules, dependencies, the CLI the smoke test uses) and diff size |
+| Risk gate | **Deterministic floor from `pipeline.yaml`:** paths (agent rules, dependencies, the CLI the smoke test uses) and diff size. Changing a file the spec didn't plan makes it at least medium |
 | Merge, deploy, smoke, revert | Local git and go against the stand-in repo and a deploy folder |
 | Review | Stub: approves unless the ticket says `never-approve` |
+
+## Specs
+
+Once readiness says a ticket is ready, a spec agent writes a short brief: the goal, what's
+in and out of scope, the decisions behind it (the readiness check's calls and your
+answers included), the files it expects to change, and how to tell it's done. It exists
+because decisions made on the way to a change were getting lost: answers appended to the
+description, assumptions in the database, the build's reasoning nowhere.
+
+- **It's committed with the change** as `specs/<ticket>.md`, one per change and never
+  updated afterwards. A record of why, next to the what. The harness writes the file
+  after the build runs, so the committed spec is the one that was written and approved.
+- **The build works from it.** The spec is the brief and the ticket is reference, so the
+  build needs to explore less.
+- **You can check it before anything is built.** The planned files are run through the
+  same risk rules as a real diff. If they hit a medium or high rule, the ticket waits for
+  you to approve the spec or ask for changes. `spec.approval` in `pipeline.yaml` can make
+  that `always` or `never`. Out of scope is where a misreading shows up: "Add a blue theme"
+  would have said "doesn't switch the poster to it" before any code existed.
+- **The build is checked against it.** The risk gate compares the real diff with the
+  planned files, and anything extra needs a human. The spec file itself never counts
+  towards risk.
+- **Retros can tell the difference** between a wrong spec and a build that strayed from a
+  right one, and can propose edits to the spec prompt too.
+
+It takes the structure of spec-driven tools like Spec Kit (a spec per change, in the repo)
+without their commands or long templates, and scales the ceremony by risk.
 
 ## Improving the process: retros
 
 After each ticket ends (deployed or abandoned), a **retro** agent reads its timeline and
-the current readiness and build prompts, and may propose up to two edits, with the
+the current readiness, spec and build prompts, and may propose up to two edits, with the
 evidence. Proposals wait under **Improvements** in the sidebar, with the diff and
 **Apply** or **Dismiss**. Applying one edits the step file, so it shows up as a normal git
 change to review and commit.
 
 The guardrails are code, not instructions to the retro:
-- Only the prompt text of `readiness` and `build` can change. Never a step's frontmatter
+- Only the prompt text of `readiness`, `spec` and `build` can change. Never a step's frontmatter
   (model, tools, permissions, budget), never `pipeline.yaml`, and never the retro's own
   prompt.
 - The text being replaced must appear exactly once, and the edited step must still load.
@@ -111,8 +142,8 @@ harness/           engine (steps and gates), store (SQLite), config (risk floor)
 agent/             step files → prompt → Runner (Claude Code CLI today)
 target/            local stand-in for GitHub, CI and deploy
 steps/             agent step definitions: model, tools, permissions, budget, schema, prompt
-                   (readiness, build, and retro, which proposes edits to the first two)
-pipeline.yaml      the rules: round cap and risk floor
+                   (readiness, spec, build, and retro, which proposes edits to the others)
+pipeline.yaml      the rules: round cap, spec approval and risk floor
 sample/poster      the toy app tickets change
 ```
 

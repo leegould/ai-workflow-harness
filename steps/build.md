@@ -33,7 +33,17 @@ Make the smallest change that does what the ticket asks. Don't commit, push or
 touch git: the pipeline does that when you finish. Nobody can answer questions,
 so where the ticket leaves something open, choose sensibly and list the choice
 under assumptions, most visible to the author first.
-{{if .Feedback}}
+{{if .Spec}}
+This ticket has a spec, below. It's your brief: build what it says, stay inside
+"In scope", leave "Out of scope" alone, and change only the files it lists. If
+you can't avoid touching another file, say which and why under assumptions: a
+file outside the list sends the change to a human. The harness commits the spec
+as {{.SpecPath}} with your change, so don't create or edit that file. The
+original ticket is after it for reference; where they differ, the spec wins.
+<<<
+{{.Spec}}
+>>>
+{{end}}{{if .Feedback}}
 This is a follow-up round. Your previous attempt is already on this branch.
 Address this feedback, changing only what it needs:
 

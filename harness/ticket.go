@@ -20,6 +20,7 @@ type Step string
 
 const (
 	StepReadiness Step = "readiness"
+	StepSpec      Step = "spec"
 	StepBuild     Step = "build"
 	StepCI        Step = "ci"
 	StepReview    Step = "review"
@@ -36,6 +37,7 @@ type Wait string
 
 const (
 	WaitQuestions Wait = "questions" // readiness needs more detail
+	WaitSpec      Wait = "spec"      // a human approves the spec before the build
 	WaitEscalated Wait = "escalated" // the loop is stuck, or a deploy was reverted
 	WaitApproval  Wait = "approval"  // the risk gate
 	WaitTakeover  Wait = "takeover"  // a human is working on the branch
@@ -47,6 +49,7 @@ type Action string
 const (
 	ActionAnswer   Action = "answer"
 	ActionApprove  Action = "approve"
+	ActionRevise   Action = "revise"
 	ActionRetry    Action = "retry"
 	ActionTakeOver Action = "takeover"
 	ActionResume   Action = "resume"
@@ -57,6 +60,7 @@ const (
 // rejected with a reason rather than silently ignored.
 var actions = map[Wait][]Action{
 	WaitQuestions: {ActionAnswer, ActionAbandon},
+	WaitSpec:      {ActionApprove, ActionRevise, ActionAbandon},
 	WaitEscalated: {ActionRetry, ActionTakeOver, ActionAbandon},
 	WaitApproval:  {ActionApprove, ActionRetry, ActionTakeOver, ActionAbandon},
 	WaitTakeover:  {ActionResume, ActionAbandon},
@@ -87,6 +91,11 @@ type Ticket struct {
 	Merged   string  `json:"merged,omitempty"`
 	Deployed string  `json:"deployed,omitempty"`
 	CostUSD  float64 `json:"costUSD"`
+
+	// Spec is the markdown committed as specs/<id>.md with the change.
+	// SpecFiles is what it plans to change, checked against the real diff.
+	Spec      string   `json:"spec,omitempty"`
+	SpecFiles []string `json:"specFiles,omitempty"`
 
 	Questions int    `json:"questions"`       // questions readiness asked, in total
 	Retro     string `json:"retro,omitempty"` // pending once finished; see RetroOnce

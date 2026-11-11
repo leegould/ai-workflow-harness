@@ -44,7 +44,23 @@ var ErrBadLevel = errors.New("risk level must be low, medium or high")
 type Config struct {
 	MaxRounds int        `yaml:"max_rounds"`
 	Risk      RiskConfig `yaml:"risk"`
+	Spec      SpecConfig `yaml:"spec"`
 }
+
+// SpecConfig says when a human approves the spec before the build: when the
+// files it plans to change hit a medium or high risk rule (the default),
+// always, or never.
+type SpecConfig struct {
+	Approval string `yaml:"approval"`
+}
+
+const (
+	SpecRisky  = "risky"
+	SpecAlways = "always"
+	SpecNever  = "never"
+)
+
+var ErrBadApproval = errors.New("spec approval must be risky, always or never")
 
 // RiskConfig is the deterministic risk floor: which paths and diff sizes force
 // a human to approve before merge. An LLM risk note could raise the level
@@ -73,6 +89,13 @@ func LoadConfig(file string) (Config, error) {
 	}
 	if c.MaxRounds <= 0 {
 		c.MaxRounds = 3
+	}
+	switch c.Spec.Approval {
+	case "":
+		c.Spec.Approval = SpecRisky
+	case SpecRisky, SpecAlways, SpecNever:
+	default:
+		return Config{}, fmt.Errorf("%s: %w: %q", file, ErrBadApproval, c.Spec.Approval)
 	}
 	for i := range c.Risk.Rules {
 		r := &c.Risk.Rules[i]

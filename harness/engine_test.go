@@ -18,8 +18,10 @@ import (
 )
 
 // fakeAgent stands in for the agents. Readiness: tickets marked THIN aren't
-// ready until the prompt carries answers. Build: always reports a change. It
-// renders the real step files, so a broken template fails these tests.
+// ready until the prompt carries answers. Spec: plans poster.go, or main.go
+// (a medium-risk path) for tickets marked PLANMAIN. Build: always reports a
+// change. It renders the real step files, so a broken template fails these
+// tests.
 type fakeAgent struct{ fail error }
 
 func (f fakeAgent) Run(_ context.Context, step agent.StepDef, prompt, _ string) (agent.AgentResult, error) {
@@ -29,6 +31,21 @@ func (f fakeAgent) Run(_ context.Context, step agent.StepDef, prompt, _ string) 
 	var v any = map[string]any{"summary": "did the thing", "assumptions": []string{"left poster.json as it was"}}
 	if step.Name == "retro" {
 		v = fakeRetro(prompt)
+	}
+	if step.Name == "spec" {
+		sp := specOutput{Goal: "a darker poster", OutOfScope: []string{"the default theme"},
+			Decisions: []specDecision{{"reuse the theme map", "the code already has one"}},
+			Files:     []string{"poster.go", "poster_test.go"}, DoneWhen: []string{"the poster is dark"}}
+		if strings.Contains(prompt, "PLANMAIN") {
+			sp.Files = []string{"main.go"}
+		}
+		if strings.Contains(prompt, "You wrote the spec below before") {
+			sp.Goal = "revised"
+		}
+		v = sp
+	}
+	if step.Name == "build" && !strings.Contains(prompt, "This ticket has a spec") {
+		return agent.AgentResult{}, errors.New("build prompt has no spec")
 	}
 	if step.Name == "readiness" {
 		rd := readiness{Ready: true, Reason: "clear"}
@@ -52,7 +69,8 @@ type fakeRepo struct {
 	smoke    func(n int) bool
 	smokes   int
 	changed  []target.FileChange
-	broken   error // returned by Checkout, to simulate infrastructure failure
+	broken   error  // returned by Checkout, to simulate infrastructure failure
+	dir      string // what Checkout returns; the spec is written here
 }
 
 func (f *fakeRepo) sha() string { f.n++; return fmt.Sprintf("sha%07d", f.n) }
@@ -64,7 +82,7 @@ func (f *fakeRepo) Checkout(_ context.Context, _, branch string) (string, error)
 	if branch != "main" {
 		f.branches = append(f.branches, branch)
 	}
-	return "", nil
+	return f.dir, nil
 }
 func (f *fakeRepo) CommitAndPush(context.Context, string, string, string) (string, error) {
 	return f.sha(), nil
@@ -119,7 +137,7 @@ func newHarness(t *testing.T) *harness {
 	if err := os.CopyFS(steps, os.DirFS("../steps")); err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, repo: &fakeRepo{}, clock: time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)}
+	h := &harness{t: t, repo: &fakeRepo{dir: t.TempDir()}, clock: time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)}
 	h.e = &Engine{Store: store, Repo: h.repo, Runner: fakeAgent{}, StepsDir: steps, Config: cfg,
 		Now: func() time.Time { return h.clock }}
 	return h
@@ -566,5 +584,87 @@ func TestFeedbackOnlyOnFinishedTicketsWithNoRetroRunning(t *testing.T) {
 	}
 	if _, err := h.e.Feedback(ctx, "T-99", true, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing ticket: got %v", err)
+	}
+}
+
+// The spec is committed with the change, the build works from it, and the
+// spec file itself never counts towards risk (specs are markdown, which is a
+// high-risk path).
+func TestSpecIsCommittedWithTheChange(t *testing.T) {
+	h := newHarness(t)
+	h.repo.changed = []target.FileChange{{Path: "poster.go", Added: 5}, {Path: "specs/T-1.md", Added: 20}}
+	tk := h.drain(h.create("Add a dark theme"))
+	expectDeployed(t, tk)
+	if tk.Risk != "low" || !strings.Contains(tk.Spec, "## Out of scope\n\n- the default theme") {
+		t.Fatalf("got risk %s, spec:\n%s", tk.Risk, tk.Spec)
+	}
+	body, err := os.ReadFile(filepath.Join(h.repo.dir, "specs", "T-1.md")) //nolint:gosec // test dir
+	if err != nil || string(body) != tk.Spec {
+		t.Fatalf("spec file %q, %v", body, err)
+	}
+}
+
+func TestRiskySpecWaitsForApprovalAndCanBeRevised(t *testing.T) {
+	h := newHarness(t)
+	id := h.create("Change the flags PLANMAIN")
+	tk := h.drain(id)
+	expectWaiting(t, tk, WaitSpec)
+	if !strings.Contains(tk.WaitText, "main.go") || tk.Builds != 0 {
+		t.Fatalf("got %+v", tk)
+	}
+	if _, err := h.e.Act(context.Background(), id, ActionRevise, " "); !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("revise without a comment: got %v", err)
+	}
+	h.act(id, ActionRevise, "keep the old flag working")
+	tk = h.drain(id)
+	expectWaiting(t, tk, WaitSpec)
+	if !strings.Contains(tk.Spec, "revised") || !strings.Contains(tk.Description, "Spec feedback:\nkeep the old flag") {
+		t.Fatalf("got %+v", tk)
+	}
+	h.act(id, ActionApprove, "")
+	h.repo.changed = []target.FileChange{{Path: "main.go", Added: 3}}
+	tk = h.drain(id)
+	// Approving the spec builds; the merge still has its own gate.
+	expectWaiting(t, tk, WaitApproval)
+	if tk.Builds != 1 {
+		t.Fatalf("builds %d", tk.Builds)
+	}
+}
+
+// A build that strays outside the files its spec planned needs a human.
+func TestUnplannedFilesRaiseRisk(t *testing.T) {
+	h := newHarness(t)
+	h.repo.changed = []target.FileChange{{Path: "poster.go", Added: 5}, {Path: "style.go", Added: 2}}
+	tk := h.drain(h.create("Add a dark theme"))
+	expectWaiting(t, tk, WaitApproval)
+	if tk.Risk != "medium" || !strings.Contains(tk.WaitText, "didn't plan: style.go") || strings.Contains(tk.WaitText, "low:") {
+		t.Fatalf("got %+v", tk)
+	}
+}
+
+func TestSpecApprovalSetting(t *testing.T) {
+	for approval, want := range map[string]bool{SpecAlways: true, SpecNever: false} {
+		t.Run(approval, func(t *testing.T) {
+			h := newHarness(t)
+			h.e.Config.Spec.Approval = approval
+			desc := "Add a dark theme"
+			if !want {
+				desc += " PLANMAIN" // risky, but never means never
+			}
+			tk := h.drain(h.create(desc))
+			if got := tk.Wait == WaitSpec; got != want {
+				t.Fatalf("waiting for spec: got %v, want %v (%+v)", got, want, tk)
+			}
+		})
+	}
+}
+
+func TestUnplanned(t *testing.T) {
+	changes := []target.FileChange{{Path: "poster.go"}, {Path: "themes/blue.css"}, {Path: "main.go"}}
+	if got := unplanned([]string{"./poster.go", "themes/"}, changes); !slices.Equal(got, []string{"main.go"}) {
+		t.Fatalf("got %v", got)
+	}
+	if got := unplanned(nil, changes); got != nil {
+		t.Fatalf("no plan means nothing to check, got %v", got)
 	}
 }

@@ -13,6 +13,14 @@ type buildRequest struct {
 	Ticket   ticket
 	Branch   string
 	Feedback string
+	Spec     string
+	SpecPath string
+}
+
+type specRequest struct {
+	Ticket    ticket
+	Previous  string
+	Readiness []string
 }
 
 // The real step files must load and render; this stops a bad edit reaching a run.
@@ -26,6 +34,9 @@ func TestStepFilesLoad(t *testing.T) {
 		{"readiness", tk, []string{"Ticket T-9: Health", "Add /health"}},
 		{"build", buildRequest{Ticket: tk, Branch: "ai/T-9/1"}, []string{"Ticket T-9: Health", "branch ai/T-9/1"}},
 		{"build", buildRequest{Ticket: tk, Feedback: "CI failed: vet"}, []string{"follow-up round", "CI failed: vet"}},
+		{"build", buildRequest{Ticket: tk, Spec: "# T-9: Health", SpecPath: "specs/T-9.md"}, []string{"has a spec", "# T-9: Health", "as specs/T-9.md"}},
+		{"spec", specRequest{Ticket: tk, Readiness: []string{"JSON, not text"}}, []string{"Ticket T-9: Health", "- JSON, not text"}},
+		{"spec", specRequest{Ticket: tk, Previous: "# old spec"}, []string{"asked for changes", "# old spec"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.step, func(t *testing.T) {

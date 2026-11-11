@@ -4,9 +4,19 @@
 # Build rounds (each round is build, then CI, then review) before it escalates.
 max_rounds: 3
 
+# After readiness, an agent writes a short spec, committed with the change as
+# specs/<ticket>.md. When does a human approve it before anything is built?
+#   risky:  when the files it plans to change hit a medium or high rule below
+#   always: every ticket
+#   never:  it's still written and committed, but nobody approves it first
+spec:
+  approval: risky
+
 # The deterministic risk floor. The highest matching level wins. Low merges
 # automatically; medium and high wait for a human to approve. An LLM risk note
-# may raise the level later, but never lower it below this.
+# may raise the level later, but never lower it below this. Two things are
+# done in code, not here: the ticket's own spec file doesn't count, and a
+# change to a file the spec didn't plan makes it at least medium.
 risk:
   medium_lines: 150 # total lines added + deleted
   high_lines: 400

@@ -44,6 +44,7 @@ func TestLoadConfigRejectsBadRules(t *testing.T) {
 		"unknown level": "risk:\n  rules:\n    - paths: [x]\n      level: severe\n",
 		"bad pattern":   "risk:\n  rules:\n    - paths: [\"[\"]\n      level: low\n",
 		"not yaml":      "risk: [",
+		"bad approval":  "spec:\n  approval: sometimes\n",
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -66,7 +67,7 @@ func TestDefaultMaxRounds(t *testing.T) {
 	if err := os.WriteFile(p, []byte("risk: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if c, err := LoadConfig(p); err != nil || c.MaxRounds != 3 {
+	if c, err := LoadConfig(p); err != nil || c.MaxRounds != 3 || c.Spec.Approval != SpecRisky {
 		t.Fatalf("got %+v %v", c, err)
 	}
 }
