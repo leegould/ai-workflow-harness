@@ -1,5 +1,5 @@
 // Command harness runs the whole pipeline as one program: open the UI, create
-// a ticket, and watch it go from readiness to a deployed change.
+// a ticket, and watch it go from refinement to a deployed change.
 //
 //	go run ./cmd/harness        # then open http://localhost:8080
 package main

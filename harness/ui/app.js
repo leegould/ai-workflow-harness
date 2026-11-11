@@ -1,11 +1,11 @@
 // Harness UI: polls the API and renders the ticket list and the selected
 // ticket. No framework: the page is small enough not to need one.
-const STEPS = ["readiness", "spec", "build", "ci", "review", "risk", "merge", "deploy", "smoke"];
-const STEP_LABEL = { readiness: "Readiness", spec: "Spec", build: "Build", ci: "CI", review: "Review", risk: "Risk gate",
+const STEPS = ["refinement", "spec", "build", "ci", "review", "risk", "merge", "deploy", "smoke"];
+const STEP_LABEL = { refinement: "Refinement", spec: "Spec", build: "Build", ci: "CI", review: "Review", risk: "Risk gate",
   merge: "Merge", deploy: "Deploy", smoke: "Smoke test", resume: "Resume" };
 const ACTION_LABEL = { answer: "Send answer", approve: "Approve and merge", revise: "Ask for changes", retry: "Retry with guidance",
   takeover: "Take over", resume: "Resume", abandon: "Abandon" };
-const WAIT_TITLE = { questions: "The readiness check has questions", spec: "Check the spec before it's built", escalated: "Escalated: it needs your decision",
+const WAIT_TITLE = { questions: "Refinement has questions", spec: "Check the spec before it's built", escalated: "Escalated: it needs your decision",
   approval: "Needs your approval to merge", takeover: "You've taken this over", error: "A step keeps failing" };
 
 const $ = (id) => document.getElementById(id);

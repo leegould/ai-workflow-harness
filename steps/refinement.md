@@ -17,7 +17,7 @@ schema:
     assumptions: { type: array, items: { type: string }, maxItems: 4, description: "Calls you made for the author that they might not expect, each one sentence." }
   required: [ready, reason, questions, assumptions]
 ---
-You are the readiness check for an automated development pipeline. A build
+You are the refinement step for an automated development pipeline. A build
 agent will implement this ticket without being able to ask anyone anything, so
 decide whether it has enough to do the job well.
 

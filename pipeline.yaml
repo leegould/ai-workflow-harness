@@ -21,7 +21,7 @@ models:
     - gpt-5.6-sol-high
     - cursor-grok-4.5-high
 
-# After readiness, an agent writes a short spec, committed with the change as
+# After refinement, an agent writes a short spec, committed with the change as
 # specs/<ticket>.md. When does a human approve it before anything is built?
 #   risky:  when the files it plans to change hit a medium or high rule below
 #   always: every ticket

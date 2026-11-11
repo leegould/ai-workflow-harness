@@ -2,7 +2,7 @@
 
 The same ticket-to-deploy pipeline as [ai-workflow](https://github.com/leegould/ai-workflow),
 packaged as **one program with a UI** instead of a Temporal workflow plus workers. Run it,
-open the browser, create a ticket, and watch it go from readiness to a deployed change.
+open the browser, create a ticket, and watch it go from refinement to a deployed change.
 Anything that needs a person (questions, approval, a stuck loop) shows up as a card with
 the buttons for what you can do.
 
@@ -19,7 +19,7 @@ deployed poster.
 ## The flow
 
 ```
-readiness ─ not ready ─▶ questions for a human ─▶ answers ─▶ readiness
+refinement ─ not ready ─▶ questions for a human ─▶ answers ─▶ refinement
     │ ready
     ▼
 spec ─ risky plan ─▶ human approves, or asks for changes ─▶ spec
@@ -48,7 +48,7 @@ tickets in flight use the new model from their next run of that step.
 
 Agent steps aren't tied to Claude Code. Each step file names a `runner`: `claude-cli`
 (Claude Code), or `cursor-cli` (the Cursor CLI, with GPT, Composer and Grok models). Cursor
-runs in its read-only ask mode, so it's offered only for steps that just read (readiness,
+runs in its read-only ask mode, so it's offered only for steps that just read (refinement,
 spec, retro), and the harness checks its JSON reply against the step's schema because
 Cursor can't enforce one. Cursor reports tokens but not cost, so those runs count as $0 in
 the stats. Every agent entry on the timeline says which runner and model ran it.
@@ -62,7 +62,7 @@ reason.
 
 | Step | |
 |---|---|
-| Readiness | Claude Code agent (`steps/readiness.md`), read-only (Read/Glob/Grep) in a checkout of main |
+| Refinement | Called readiness in ai-workflow. Claude Code agent (`steps/refinement.md`), read-only (Read/Glob/Grep) in a checkout of main |
 | Spec | Claude Code agent (`steps/spec.md`), read-only in a checkout of main. Returns the spec as structured output; the harness renders it and commits it with the change |
 | Build | Claude Code agent (`steps/build.md`): edit tools plus `go test/vet/build/run` and `gofmt` only. The harness commits and pushes |
 | CI | The harness runs gofmt, vet and tests on the pushed commit itself, whatever the agent says it ran |
@@ -72,8 +72,8 @@ reason.
 
 ## Specs
 
-Once readiness says a ticket is ready, a spec agent writes a short brief: the goal, what's
-in and out of scope, the decisions behind it (the readiness check's calls and your
+Once refinement says a ticket is ready, a spec agent writes a short brief: the goal, what's
+in and out of scope, the decisions behind it (the refinement step's calls and your
 answers included), the files it expects to change, and how to tell it's done. It exists
 because decisions made on the way to a change were getting lost: answers appended to the
 description, assumptions in the database, the build's reasoning nowhere.
@@ -100,13 +100,13 @@ without their commands or long templates, and scales the ceremony by risk.
 ## Improving the process: retros
 
 After each ticket ends (deployed or abandoned), a **retro** agent reads its timeline and
-the current readiness, spec and build prompts, and may propose up to two edits, with the
+the current refinement, spec and build prompts, and may propose up to two edits, with the
 evidence. Proposals wait under **Improvements** in the sidebar, with the diff and
 **Apply** or **Dismiss**. Applying one edits the step file, so it shows up as a normal git
 change to review and commit.
 
 The guardrails are code, not instructions to the retro:
-- Only the prompt text of `readiness`, `spec` and `build` can change. Never a step's frontmatter
+- Only the prompt text of `refinement`, `spec` and `build` can change. Never a step's frontmatter
   (model, tools, permissions, budget), never `pipeline.yaml`, and never the retro's own
   prompt.
 - The text being replaced must appear exactly once, and the edited step must still load.
@@ -121,9 +121,9 @@ loop can only learn from process signals (questions, rounds, CI). A ticket can p
 gate and still miss the point: "Add a blue theme" added the theme but didn't switch the
 poster to it, and the retro called it a smooth ticket.
 
-**Decisions made for you.** Readiness and build list the calls they made where the ticket
+**Decisions made for you.** Refinement and build list the calls they made where the ticket
 left something open. These show in their own box on the ticket, not buried in a summary.
-Readiness is told to ask, not assume, when a choice changes what the author will see or get.
+Refinement is told to ask, not assume, when a choice changes what the author will see or get.
 
 The Improvements page shows questions asked per ticket, build rounds and agent spend, so
 you can see whether an applied change helped. The retro is told that most tickets need no
@@ -165,7 +165,7 @@ harness/           engine (steps and gates), store (SQLite), config (risk floor)
 agent/             step files → prompt → Runner (Claude Code CLI today)
 target/            local stand-in for GitHub, CI and deploy
 steps/             agent step definitions: model, tools, permissions, budget, schema, prompt
-                   (readiness, spec, build, and retro, which proposes edits to the others)
+                   (refinement, spec, build, and retro, which proposes edits to the others)
 pipeline.yaml      the rules: round cap, spec approval and risk floor
 sample/poster      the toy app tickets change
 ```

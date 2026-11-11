@@ -29,9 +29,9 @@ type specDecision struct {
 
 // specRequest is what the spec step's prompt is rendered from.
 type specRequest struct {
-	Ticket    Ticket
-	Previous  string   // the last spec, when the author asked for changes
-	Readiness []string // the readiness check's assumptions
+	Ticket     Ticket
+	Previous   string   // the last spec, when the author asked for changes
+	Refinement []string // the refinement step's assumptions
 }
 
 // specPath is where a ticket's spec is committed. One per change, never
@@ -48,8 +48,8 @@ func (e *Engine) spec(ctx context.Context, t *Ticket) error {
 	}
 	req := specRequest{Ticket: *t, Previous: t.Spec}
 	for _, a := range t.Assumptions {
-		if a.Step == StepReadiness {
-			req.Readiness = append(req.Readiness, a.Text)
+		if a.Step == StepRefinement {
+			req.Refinement = append(req.Refinement, a.Text)
 		}
 	}
 	var out specOutput

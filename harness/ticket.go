@@ -19,15 +19,15 @@ const (
 type Step string
 
 const (
-	StepReadiness Step = "readiness"
-	StepSpec      Step = "spec"
-	StepBuild     Step = "build"
-	StepCI        Step = "ci"
-	StepReview    Step = "review"
-	StepRisk      Step = "risk"
-	StepMerge     Step = "merge"
-	StepDeploy    Step = "deploy"
-	StepSmoke     Step = "smoke"
+	StepRefinement Step = "refinement"
+	StepSpec       Step = "spec"
+	StepBuild      Step = "build"
+	StepCI         Step = "ci"
+	StepReview     Step = "review"
+	StepRisk       Step = "risk"
+	StepMerge      Step = "merge"
+	StepDeploy     Step = "deploy"
+	StepSmoke      Step = "smoke"
 	// StepResume picks up a branch a human worked on, then goes to CI.
 	StepResume Step = "resume"
 )
@@ -36,7 +36,7 @@ const (
 type Wait string
 
 const (
-	WaitQuestions Wait = "questions" // readiness needs more detail
+	WaitQuestions Wait = "questions" // refinement needs more detail
 	WaitSpec      Wait = "spec"      // a human approves the spec before the build
 	WaitEscalated Wait = "escalated" // the loop is stuck, or a deploy was reverted
 	WaitApproval  Wait = "approval"  // the risk gate
@@ -97,7 +97,7 @@ type Ticket struct {
 	Spec      string   `json:"spec,omitempty"`
 	SpecFiles []string `json:"specFiles,omitempty"`
 
-	Questions int    `json:"questions"`       // questions readiness asked, in total
+	Questions int    `json:"questions"`       // questions refinement asked, in total
 	Retro     string `json:"retro,omitempty"` // pending once finished; see RetroOnce
 
 	// Assumptions are calls the agents made for the author, shown on the

@@ -17,7 +17,7 @@ import (
 	"aiharness/target"
 )
 
-// fakeAgent stands in for the agents. Readiness: tickets marked THIN aren't
+// fakeAgent stands in for the agents. Refinement: tickets marked THIN aren't
 // ready until the prompt carries answers. Spec: plans poster.go, or main.go
 // (a medium-risk path) for tickets marked PLANMAIN. Build: always reports a
 // change. It renders the real step files, so a broken template fails these
@@ -47,10 +47,10 @@ func (f fakeAgent) Run(_ context.Context, step agent.StepDef, prompt, _ string) 
 	if step.Name == "build" && !strings.Contains(prompt, "This ticket has a spec") {
 		return agent.AgentResult{}, errors.New("build prompt has no spec")
 	}
-	if step.Name == "readiness" {
-		rd := readiness{Ready: true, Reason: "clear"}
+	if step.Name == "refinement" {
+		rd := refinement{Ready: true, Reason: "clear"}
 		if strings.Contains(prompt, "THIN") && !strings.Contains(prompt, "Answers:") {
-			rd = readiness{Reason: "no acceptance criteria", Questions: []string{"What should it return?"}}
+			rd = refinement{Reason: "no acceptance criteria", Questions: []string{"What should it return?"}}
 		}
 		v = rd
 	}
@@ -378,12 +378,12 @@ func fakeRetro(prompt string) any {
 		Proposals []proposal `json:"proposals"`
 	}{Notes: "went fine", Proposals: []proposal{}}
 	if strings.Contains(prompt, "what the human wanted? no") {
-		out.Proposals = []proposal{{"readiness", "always matters: ask", "always matters: ask, and never switch it on silently", "the human said it didn't do what they wanted"}}
+		out.Proposals = []proposal{{"refinement", "always matters: ask", "always matters: ask, and never switch it on silently", "the human said it didn't do what they wanted"}}
 	}
 	if strings.Contains(prompt, "PROPOSE") {
 		out.Proposals = []proposal{
-			{"readiness", "ask at most 3 questions", "ask at most 1 question", "only one was answered"},
-			{"readiness", "ask at most 3 questions", "ask at most 2 questions", "a gentler version"},
+			{"refinement", "ask at most 3 questions", "ask at most 1 question", "only one was answered"},
+			{"refinement", "ask at most 3 questions", "ask at most 2 questions", "a gentler version"},
 			{"retro", "Most tickets need no change.", "Always propose.", "self-edit"},
 			{"build", "no such sentence", "x", "made up"},
 		}
@@ -416,7 +416,7 @@ func TestRetroProposesAndAHumanApplies(t *testing.T) {
 	if _, err := h.e.Decide(ctx, first.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	body, _ := os.ReadFile(filepath.Join(h.e.StepsDir, "readiness.md")) //nolint:gosec // test copy
+	body, _ := os.ReadFile(filepath.Join(h.e.StepsDir, "refinement.md")) //nolint:gosec // test copy
 	if !strings.Contains(string(body), "ask at most 1 question") {
 		t.Fatal("proposal not applied to the step file")
 	}
@@ -666,5 +666,35 @@ func TestUnplanned(t *testing.T) {
 	}
 	if got := unplanned(nil, changes); got != nil {
 		t.Fatalf("no plan means nothing to check, got %v", got)
+	}
+}
+
+// A database from before the rename opens with readiness renamed refinement.
+func TestOpenMigratesTheReadinessRename(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, q := range []string{
+		`INSERT INTO tickets (id, seq, status, not_before, data) VALUES ('T-1', 1, 'waiting', 0, '{"id":"T-1","status":"waiting","step":"readiness","assumptions":[{"step":"readiness","text":"x"}]}')`,
+		`INSERT INTO events (ticket, at, step, kind, message, detail, cost) VALUES ('T-1', 0, 'readiness', 'agent', 'm', '', 0)`,
+	} {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = s.Close()
+	for range 2 { // and opening it again changes nothing
+		if s, err = Open(path); err != nil {
+			t.Fatal(err)
+		}
+		tk, err := s.Get(ctx, "T-1")
+		evs, _ := s.Events(ctx, "T-1")
+		if err != nil || tk.Step != StepRefinement || tk.Assumptions[0].Step != StepRefinement || evs[0].Step != StepRefinement {
+			t.Fatalf("got %+v, events %+v, %v", tk, evs, err)
+		}
+		_ = s.Close()
 	}
 }

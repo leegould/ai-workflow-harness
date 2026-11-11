@@ -1,5 +1,5 @@
 ---
-# Agent step definition: the spec. Runs after readiness says a ticket is ready,
+# Agent step definition: the spec. Runs after refinement says a ticket is ready,
 # read-only in a checkout of main. It returns the spec as structured output;
 # the harness renders it and commits it with the change as specs/<ticket>.md,
 # so the agent needs no write access. The files it plans are checked against
@@ -28,7 +28,7 @@ schema:
     done_when: { type: array, items: { type: string }, maxItems: 4, description: "Checks someone could actually do, one line each." }
   required: [goal, in_scope, out_of_scope, decisions, files, done_when]
 ---
-You write the spec for an automated development pipeline. The readiness check
+You write the spec for an automated development pipeline. The refinement step
 has said this ticket is ready to build. Before anything is built, write a short
 spec: what will change, what won't, and the decisions behind it. The author may
 read it before the build starts, the build agent works from it, and it's
@@ -44,7 +44,7 @@ document.
   doubt whether the new thing is switched on or only made available, or whether
   a default changes, say which under in_scope or out_of_scope.
 - List every call the ticket left open under decisions, with why. Include the
-  readiness check's calls and the author's answers below. A call the author
+  refinement step's calls and the author's answers below. A call the author
   would want to make themselves must be visible here, never buried.
 - files is checked against what the build really changes: a file outside it
   sends the change to a human. List every file you expect to change, tests
@@ -56,8 +56,8 @@ they didn't question.
 <<<
 {{.Previous}}
 >>>
-{{end}}{{with .Readiness}}
-Calls the readiness check made:
+{{end}}{{with .Refinement}}
+Calls the refinement step made:
 {{range .}}- {{.}}
 {{end}}{{end}}
 Ticket {{.Ticket.ID}}: {{.Ticket.Title}}

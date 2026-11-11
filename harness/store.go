@@ -42,7 +42,7 @@ CREATE INDEX IF NOT EXISTS events_ticket ON events (ticket, id);
 `
 
 // migrate brings an older database up to date. Events gained a model column
-// after the first tickets ran; old rows get "".
+// after the first tickets ran (old rows get ""), and a step was renamed.
 func migrate(db *sql.DB) error {
 	ctx := context.Background()
 	var n int
@@ -51,6 +51,17 @@ func migrate(db *sql.DB) error {
 	}
 	if n == 0 {
 		if _, err := db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN model TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+	// The readiness step was renamed refinement. Each statement only matches
+	// rows still using the old name, so running it again changes nothing.
+	for _, q := range []string{
+		`UPDATE events SET step = 'refinement' WHERE step = 'readiness'`,
+		`UPDATE tickets SET data = replace(data, '"step":"readiness"', '"step":"refinement"') WHERE instr(data, '"step":"readiness"') > 0`,
+		`UPDATE proposals SET data = replace(data, '"step":"readiness"', '"step":"refinement"') WHERE instr(data, '"step":"readiness"') > 0`,
+	} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}

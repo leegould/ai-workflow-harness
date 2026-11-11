@@ -19,14 +19,14 @@ func stepsCopy(t *testing.T) string {
 
 func TestEditPromptChangesOnlyThePrompt(t *testing.T) {
 	dir := stepsCopy(t)
-	before, err := os.ReadFile(filepath.Join(dir, "readiness.md")) //nolint:gosec // test copy
+	before, err := os.ReadFile(filepath.Join(dir, "refinement.md")) //nolint:gosec // test copy
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EditPrompt(dir, "readiness", "ask at most 3 questions", "ask at most 1 question"); err != nil {
+	if err := EditPrompt(dir, "refinement", "ask at most 3 questions", "ask at most 1 question"); err != nil {
 		t.Fatal(err)
 	}
-	after, err := os.ReadFile(filepath.Join(dir, "readiness.md")) //nolint:gosec // test copy
+	after, err := os.ReadFile(filepath.Join(dir, "refinement.md")) //nolint:gosec // test copy
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestEditPromptChangesOnlyThePrompt(t *testing.T) {
 	if !strings.Contains(string(after), "ask at most 1 question") {
 		t.Fatal("edit not applied")
 	}
-	if _, err := LoadStep(dir, "readiness"); err != nil {
+	if _, err := LoadStep(dir, "refinement"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -52,15 +52,15 @@ func TestEditPromptRefuses(t *testing.T) {
 	}
 	for name, edit := range tests {
 		t.Run(name, func(t *testing.T) {
-			if err := CheckEdit(dir, "readiness", edit[0], edit[1]); err == nil {
+			if err := CheckEdit(dir, "refinement", edit[0], edit[1]); err == nil {
 				t.Fatal("expected a refusal")
 			}
-			if err := EditPrompt(dir, "readiness", edit[0], edit[1]); err == nil {
+			if err := EditPrompt(dir, "refinement", edit[0], edit[1]); err == nil {
 				t.Fatal("expected a refusal")
 			}
 		})
 	}
-	if err := CheckEdit(dir, "readiness", "no such sentence", "x"); !errors.Is(err, ErrEditNoMatch) {
+	if err := CheckEdit(dir, "refinement", "no such sentence", "x"); !errors.Is(err, ErrEditNoMatch) {
 		t.Fatalf("got %v", err)
 	}
 	if _, err := PromptBody(dir, "missing"); err == nil {

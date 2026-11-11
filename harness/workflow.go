@@ -49,7 +49,7 @@ func (e *Engine) Workflow() (Workflow, error) {
 		SpecNever:  "nobody approves it first",
 	}[e.Config.Spec.Approval]
 	steps := []WorkflowStep{
-		{ID: StepReadiness, Label: "Readiness", Kind: "agent",
+		{ID: StepRefinement, Label: "Refinement", Kind: "agent",
 			Summary: "Reads the ticket and the code on main. Asks you only what the code can't answer.",
 			Loops:   []string{"Not ready: waits for your answers, then checks again"}},
 		{ID: StepSpec, Label: "Spec", Kind: "agent",
@@ -118,7 +118,7 @@ func (e *Engine) checkRunner(step agent.StepDef) error {
 }
 
 // agentSteps are the steps whose model can be chosen.
-var agentSteps = []string{"readiness", "spec", "build", "retro"}
+var agentSteps = []string{"refinement", "spec", "build", "retro"}
 
 // SetModel changes the runner and model an agent step runs on, from the ones
 // pipeline.yaml allows, and only to a runner that can run that step. It edits
