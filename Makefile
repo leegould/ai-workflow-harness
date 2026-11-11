@@ -6,7 +6,7 @@ COVERAGE_MIN := 70
 # Domain code only: cmd/ is a thin main that wires things up.
 COVERAGE_PKGS := ./harness/...,./agent/...,./target/...
 
-.PHONY: check fmt lint vuln test coverage run
+.PHONY: check fmt lint vuln test coverage run hooks
 
 check: lint vuln test coverage
 
@@ -28,3 +28,7 @@ coverage: test
 
 run:
 	go run ./cmd/harness
+
+# Runs `make check` on the staged tree before every commit (.githooks/pre-commit).
+hooks:
+	git config core.hooksPath .githooks

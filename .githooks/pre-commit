@@ -1,0 +1,14 @@
+#!/bin/sh
+# Runs `make check` on exactly what's being committed: the staged files,
+# copied out of the index. Unstaged edits can't make a commit pass or fail,
+# and the gate doesn't depend on whoever is committing saying they ran it.
+# Install with `make hooks`.
+set -eu
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+git checkout-index -a --prefix="$tmp/"
+echo "pre-commit: make check on the staged tree"
+if ! (cd "$tmp" && make check); then
+	echo "pre-commit: make check failed, nothing committed" >&2
+	exit 1
+fi

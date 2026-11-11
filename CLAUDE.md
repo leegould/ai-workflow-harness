@@ -2,6 +2,8 @@
 
 Read README.md first.
 
+- Commits run `make check` on the staged files (`make hooks` installs the hook). Never
+  skip it with `--no-verify`: if it fails, fix the cause.
 - Run `make check` before you finish and make it pass (lint, govulncheck, race tests,
   coverage). `make fmt` fixes formatting. Never weaken a gate: don't edit `.golangci.yml`,
   `Makefile`, `tools/go.mod` or `pipeline.yaml` unless that's the task.
