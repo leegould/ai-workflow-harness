@@ -15,6 +15,7 @@ let selected = location.hash.slice(1) || null;
 // (no card), so resetting to null would leave the last ticket's card showing.
 let shownWait;
 let shownVerdict;
+let shownWorkflow = false; // drawn once per visit, so polling doesn't close an open dropdown
 const openDetails = new Set(); // timeline entries the user expanded, kept open across polls
 
 async function api(path, opts) {
@@ -51,6 +52,7 @@ async function refreshList() {
   const [tickets, stats] = await Promise.all([api("/api/tickets"), api("/api/stats")]);
   $("improve-count").textContent = stats.openProposals || "";
   $("improve-link").classList.toggle("active", selected === "improvements");
+  $("workflow-link").classList.toggle("active", !selected && $("create").hidden);
   $("tickets").replaceChildren(...tickets.map((t) => el("a", { href: `#${t.id}`, class: t.id === selected ? "active" : "" },
     el("div", { class: "t-title" }, el("span", { class: `dot ${dotClass(t)}` }), t.title),
     el("div", { class: `t-sub ${t.status === "waiting" ? "needs" : ""}` }, `${t.id} · ${statusText(t)}`))));
@@ -85,10 +87,10 @@ async function refreshImprovements() {
 }
 
 async function refreshTicket() {
-  if (!selected) return show("empty");
+  if (!selected) { show("workflow"); return shownWorkflow ? null : refreshWorkflow(); }
   if (selected === "improvements") { show("improvements"); return refreshImprovements(); }
   let data;
-  try { data = await api(`/api/tickets/${selected}`); } catch { return show("empty"); }
+  try { data = await api(`/api/tickets/${selected}`); } catch { selected = null; return refreshTicket(); }
   const { ticket: t, events, actions } = data;
   show("ticket");
   $("t-id").textContent = t.id;
@@ -201,8 +203,45 @@ function label(t, a) {
   return ACTION_LABEL[a];
 }
 
+const KIND_LABEL = { agent: "Agent", check: "Check", gate: "Gate", ship: "Ship" };
+
+async function refreshWorkflow() {
+  const wf = await api("/api/workflow");
+  shownWorkflow = true;
+  const card = (s, n) => {
+    const status = el("span", { class: "saved" });
+    let agent = null;
+    if (s.agent) {
+      const models = wf.models.includes(s.agent.model) ? wf.models : [s.agent.model, ...wf.models];
+      const select = el("select", { "aria-label": `Model for ${s.label}`, onchange: async () => {
+        status.className = "saved";
+        status.textContent = "Saving…";
+        try {
+          await api(`/api/workflow/steps/${s.agent.step}/model`, { model: select.value });
+          status.textContent = `Saved: the next ${s.label.toLowerCase()} run uses ${select.value}`;
+        } catch (e) { status.className = "saved error"; status.textContent = e.message; select.value = s.agent.model; }
+      } }, ...models.map((m) => { const o = el("option", { value: m }, m); o.selected = m === s.agent.model; return o; }));
+      agent = el("div", { class: "agent-cfg" },
+        el("label", { class: "model" }, "Model", select),
+        el("span", { class: "muted" }, `tools: ${s.agent.tools.length ? s.agent.tools.join(", ") : "none"}`),
+        el("span", { class: "muted" }, `budget: $${s.agent.budgetUSD.toFixed(2)} a run`),
+        status);
+    }
+    return el("li", { class: `flow-step ${s.kind}` },
+      el("div", { class: "flow-head" },
+        n ? el("span", { class: "flow-n" }, n) : null,
+        el("b", {}, s.label),
+        el("span", { class: `kind ${s.kind}` }, KIND_LABEL[s.kind] || s.kind)),
+      el("p", {}, s.summary),
+      s.loops ? el("ul", { class: "loops" }, ...s.loops.map((l) => el("li", {}, l))) : null,
+      agent);
+  };
+  $("flow").replaceChildren(...wf.steps.map((s, i) => card(s, i + 1)));
+  $("flow-retro").replaceChildren(el("ol", { class: "flow" }, card(wf.retro)));
+}
+
 function show(id) {
-  for (const s of ["create", "ticket", "improvements", "empty"]) $(s).hidden = s !== id;
+  for (const s of ["create", "ticket", "improvements", "workflow"]) $(s).hidden = s !== id;
 }
 
 async function tick() {
@@ -225,7 +264,8 @@ window.addEventListener("hashchange", () => {
   selected = location.hash.slice(1) || null;
   shownWait = undefined;
   shownVerdict = undefined;
-  if (selected) show(selected === "improvements" ? "improvements" : "ticket");
+  shownWorkflow = false;
+  show(!selected ? "workflow" : selected === "improvements" ? "improvements" : "ticket");
   tick();
 });
 

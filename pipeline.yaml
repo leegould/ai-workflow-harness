@@ -4,6 +4,15 @@
 # Build rounds (each round is build, then CI, then review) before it escalates.
 max_rounds: 3
 
+# The models an agent step can be switched to from the Workflow page. Choosing
+# one rewrites that step file's model: line and nothing else. Steps read their
+# file on every run, so tickets in flight pick it up at their next run.
+models:
+  - claude-fable-5-1
+  - claude-opus-5-5
+  - claude-sonnet-5-5
+  - claude-haiku-5-5
+
 # After readiness, an agent writes a short spec, committed with the change as
 # specs/<ticket>.md. When does a human approve it before anything is built?
 #   risky:  when the files it plans to change hit a medium or high rule below

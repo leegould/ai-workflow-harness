@@ -40,6 +40,12 @@ build ─▶ CI ─ fail ─▶ build (max 3 rounds, then escalate to a human)
                            deployed
 ```
 
+The UI's start page, **Workflow**, shows this flow as it runs now: each step, its loops
+back, the gate settings from `pipeline.yaml`, and the model each agent step uses. Pick a
+different model there and it rewrites only that step file's `model:` line (a one-line git
+diff), from the list `pipeline.yaml` allows. Steps read their file on every run, so
+tickets in flight use the new model from their next run of that step.
+
 Human decisions: **answer**, **approve** (a spec or a merge), **revise** (a spec), **retry** (with guidance), **take over** (you
 push to the branch, then **resume**, and your work goes through CI, review and the risk
 gate too), **abandon**. An action that doesn't fit the current wait is rejected with a
@@ -161,6 +167,8 @@ sample/poster      the toy app tickets change
 ## Next
 
 - A real review agent, with the target's CLAUDE.md as its rubric.
+- Record the model and prompt version on each agent run, so stats can compare models and
+  a retro judges a ticket against the prompt it actually ran with.
 - Retros across several tickets: only propose a change when a pattern repeats.
 - Stats before and after each applied proposal, to show whether it helped.
 - An LLM risk note that can raise the floor but never lower it.

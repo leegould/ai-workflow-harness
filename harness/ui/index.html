@@ -10,7 +10,9 @@
 <aside class="sidebar">
   <div class="brand">Harness</div>
   <button class="new" id="new-ticket">+ New ticket</button>
+  <a class="improve-link" id="workflow-link" href="#">Workflow</a>
   <a class="improve-link" id="improve-link" href="#improvements">Improvements <span class="count" id="improve-count"></span></a>
+  <div class="nav-head">Tickets</div>
   <nav id="tickets" aria-label="Tickets"></nav>
 </aside>
 
@@ -51,9 +53,12 @@
     <div id="proposals"></div>
   </section>
 
-  <section id="empty" class="panel empty">
-    <h1>No ticket selected</h1>
-    <p class="muted">Create a ticket and watch it go from readiness to a deployed change.</p>
+  <section id="workflow" class="panel" hidden>
+    <h1>Workflow</h1>
+    <p class="muted">How this harness takes a ticket to a deployed change, step by step. Agent steps show the model they run on: changing one edits only that step file's <code>model:</code> line, and tickets in flight use it from their next run of that step. Gates and their settings come from <code>pipeline.yaml</code>.</p>
+    <ol class="flow" id="flow"></ol>
+    <h2>After each ticket</h2>
+    <div id="flow-retro"></div>
   </section>
 </main>
 <script src="app.js"></script>

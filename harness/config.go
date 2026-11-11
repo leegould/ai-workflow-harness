@@ -45,6 +45,8 @@ type Config struct {
 	MaxRounds int        `yaml:"max_rounds"`
 	Risk      RiskConfig `yaml:"risk"`
 	Spec      SpecConfig `yaml:"spec"`
+	// Models are the ones an agent step may be switched to from the UI.
+	Models []string `yaml:"models"`
 }
 
 // SpecConfig says when a human approves the spec before the build: when the

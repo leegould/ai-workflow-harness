@@ -67,3 +67,32 @@ func TestEditPromptRefuses(t *testing.T) {
 		t.Fatal("expected an error for a missing step")
 	}
 }
+
+func TestSetModelChangesOnlyTheModelLine(t *testing.T) {
+	dir := stepsCopy(t)
+	before, _ := os.ReadFile(filepath.Join(dir, "spec.md")) //nolint:gosec // test copy
+	if err := SetModel(dir, "spec", "claude-haiku-5-5"); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(filepath.Join(dir, "spec.md")) //nolint:gosec // test copy
+	s, err := LoadStep(dir, "spec")
+	if err != nil || s.Model != "claude-haiku-5-5" {
+		t.Fatalf("got %q %v", s.Model, err)
+	}
+	b, a := strings.Split(string(before), "\n"), strings.Split(string(after), "\n")
+	changed := 0
+	for i := range b {
+		if b[i] != a[i] {
+			changed++
+		}
+	}
+	if len(a) != len(b) || changed != 1 {
+		t.Fatalf("want a one-line change, got %d lines changed", changed)
+	}
+	if err := SetModel(dir, "spec", "x\ntools: [Bash]"); err == nil {
+		t.Fatal("a model that injects frontmatter must be refused")
+	}
+	if err := SetModel(dir, "missing", "claude-haiku-5-5"); err == nil {
+		t.Fatal("expected an error for a missing step")
+	}
+}

@@ -131,6 +131,33 @@ func Server(e *Engine, posterPage string) http.Handler {
 		reply(w, http.StatusOK, s)
 	})
 
+	mux.HandleFunc("GET /api/workflow", func(w http.ResponseWriter, _ *http.Request) {
+		wf, err := e.Workflow()
+		if err != nil {
+			fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		reply(w, http.StatusOK, wf)
+	})
+
+	mux.HandleFunc("POST /api/workflow/steps/{step}/model", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Model string }
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			fail(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := e.SetModel(r.PathValue("step"), in.Model); err != nil {
+			fail(w, status(err), err)
+			return
+		}
+		wf, err := e.Workflow()
+		if err != nil {
+			fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		reply(w, http.StatusOK, wf)
+	})
+
 	mux.HandleFunc("GET /poster", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(posterPage); err != nil {
 			http.Error(w, "Nothing deployed yet.", http.StatusNotFound)
@@ -145,6 +172,8 @@ func status(err error) int {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, ErrBadModel):
+		return http.StatusBadRequest
 	case errors.Is(err, ErrInvalidAction), errors.Is(err, ErrProposalClosed):
 		return http.StatusConflict
 	}

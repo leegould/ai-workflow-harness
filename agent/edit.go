@@ -4,10 +4,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
 
-var ErrEditNoMatch = errors.New("the text to replace must appear exactly once in the prompt")
+var (
+	ErrEditNoMatch = errors.New("the text to replace must appear exactly once in the prompt")
+	ErrNoModelLine = errors.New("frontmatter must have exactly one top-level model: line")
+)
+
+// modelLine is the top-level model setting; indented "model:" keys (inside a
+// schema, say) don't match.
+var modelLine = regexp.MustCompile(`(?m)^model:[^\n]*$`)
 
 // PromptBody returns a step's prompt: the part after the frontmatter.
 func PromptBody(dir, name string) (string, error) {
@@ -37,6 +45,41 @@ func EditPrompt(dir, name, find, replace string) error {
 	updated, err := editedStep(dir, name, find, replace)
 	if err != nil {
 		return err
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open steps dir: %w", err)
+	}
+	defer root.Close()
+	if err := root.WriteFile(name+".md", []byte(updated), 0o600); err != nil {
+		return fmt.Errorf("write step %s: %w", name, err)
+	}
+	return nil
+}
+
+// SetModel changes the model a step runs on. It rewrites that one line of the
+// frontmatter and nothing else, so tools, permissions and budget stay as
+// reviewed, and the change shows up as a one-line diff.
+func SetModel(dir, name, model string) error {
+	raw, err := readStep(dir, name)
+	if err != nil {
+		return err
+	}
+	front, body, ok := splitFrontmatter(raw)
+	if !ok {
+		return fmt.Errorf("step %s: missing --- frontmatter", name)
+	}
+	if len(modelLine.FindAllStringIndex(front, -1)) != 1 {
+		return fmt.Errorf("step %s: %w", name, ErrNoModelLine)
+	}
+	front = modelLine.ReplaceAllLiteralString(front, "model: "+model)
+	updated := "---\n" + front + "\n---\n" + body
+	s, err := parseStep(name, updated)
+	if err != nil {
+		return fmt.Errorf("model change would break step %s: %w", name, err)
+	}
+	if s.Model != model {
+		return fmt.Errorf("step %s: model reads back as %q, not %q", name, s.Model, model)
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
