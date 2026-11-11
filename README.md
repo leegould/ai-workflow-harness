@@ -46,6 +46,13 @@ different model there and it rewrites only that step file's `model:` line (a one
 diff), from the list `pipeline.yaml` allows. Steps read their file on every run, so
 tickets in flight use the new model from their next run of that step.
 
+Agent steps aren't tied to Claude Code. Each step file names a `runner`: `claude-cli`
+(Claude Code), or `cursor-cli` (the Cursor CLI, with GPT, Composer and Grok models). Cursor
+runs in its read-only ask mode, so it's offered only for steps that just read (readiness,
+spec, retro), and the harness checks its JSON reply against the step's schema because
+Cursor can't enforce one. Cursor reports tokens but not cost, so those runs count as $0 in
+the stats. Every agent entry on the timeline says which runner and model ran it.
+
 Human decisions: **answer**, **approve** (a spec or a merge), **revise** (a spec), **retry** (with guidance), **take over** (you
 push to the branch, then **resume**, and your work goes through CI, review and the risk
 gate too), **abandon**. An action that doesn't fit the current wait is rejected with a
