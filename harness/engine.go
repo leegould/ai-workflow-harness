@@ -202,11 +202,12 @@ func (e *Engine) failed(ctx context.Context, t *Ticket, err error) {
 }
 
 func (e *Engine) event(ctx context.Context, t *Ticket, kind, message, detail string) {
-	e.costEvent(ctx, t, kind, message, detail, 0)
+	e.costEvent(ctx, t, kind, message, detail, agentRun{})
 }
 
-func (e *Engine) costEvent(ctx context.Context, t *Ticket, kind, message, detail string, cost float64) {
-	ev := Event{Ticket: t.ID, At: e.now(), Step: t.Step, Kind: kind, Message: message, Detail: detail, CostUSD: cost}
+// costEvent records an agent run: what it cost and which model ran it.
+func (e *Engine) costEvent(ctx context.Context, t *Ticket, kind, message, detail string, run agentRun) {
+	ev := Event{Ticket: t.ID, At: e.now(), Step: t.Step, Kind: kind, Message: message, Detail: detail, CostUSD: run.Cost, By: run.By}
 	if err := e.Store.AddEvent(ctx, ev); err != nil {
 		log.Printf("event for %s: %v", t.ID, err)
 	}
@@ -228,19 +229,19 @@ func (e *Engine) readiness(ctx context.Context, t *Ticket) error {
 		return fmt.Errorf("check out: %w", err)
 	}
 	var rd readiness
-	cost, err := e.runAgent(ctx, "readiness", t, dir, &rd)
+	run, err := e.runAgent(ctx, "readiness", t, dir, &rd)
 	if err != nil {
 		return err
 	}
-	t.CostUSD += cost
+	t.CostUSD += run.Cost
 	t.Questions += len(rd.Questions)
 	t.setAssumptions(StepReadiness, rd.Assumptions)
 	if rd.Ready {
-		e.costEvent(ctx, t, "agent", "Ready to build", rd.Reason, cost)
+		e.costEvent(ctx, t, "agent", "Ready to build", rd.Reason, run)
 		e.next(t, StepSpec)
 		return nil
 	}
-	e.costEvent(ctx, t, "agent", "Needs more detail", rd.Reason, cost)
+	e.costEvent(ctx, t, "agent", "Needs more detail", rd.Reason, run)
 	var qs strings.Builder
 	for i, q := range rd.Questions {
 		fmt.Fprintf(&qs, "%d. %s\n", i+1, q)
@@ -273,7 +274,7 @@ func (e *Engine) build(ctx context.Context, t *Ticket) error {
 		Assumptions []string `json:"assumptions"`
 	}
 	req := buildRequest{Ticket: *t, Branch: branch, Feedback: t.Feedback, Spec: t.Spec, SpecPath: specPath(t.ID)}
-	cost, err := e.runAgent(ctx, "build", req, dir, &out)
+	run, err := e.runAgent(ctx, "build", req, dir, &out)
 	if err != nil {
 		return err
 	}
@@ -288,9 +289,9 @@ func (e *Engine) build(ctx context.Context, t *Ticket) error {
 	t.Builds++
 	t.Branch = branch
 	t.SHA = sha
-	t.CostUSD += cost
+	t.CostUSD += run.Cost
 	t.setAssumptions(StepBuild, out.Assumptions)
-	e.costEvent(ctx, t, "agent", fmt.Sprintf("Round %d pushed %s to %s", t.Round, short(sha), branch), out.Summary, cost)
+	e.costEvent(ctx, t, "agent", fmt.Sprintf("Round %d pushed %s to %s", t.Round, short(sha), branch), out.Summary, run)
 	e.next(t, StepCI)
 	return nil
 }
@@ -494,25 +495,33 @@ func (e *Engine) Act(ctx context.Context, id string, a Action, comment string) (
 	return t, nil
 }
 
+// agentRun is what the timeline records about one agent run.
+type agentRun struct {
+	Cost float64
+	By   string // runner/model, e.g. cursor-cli/composer-2.5
+}
+
 // runAgent renders a step file with data, runs it in dir and decodes its
-// structured output into out. It returns the run's cost.
-func (e *Engine) runAgent(ctx context.Context, name string, data any, dir string, out any) (float64, error) {
+// structured output into out.
+func (e *Engine) runAgent(ctx context.Context, name string, data any, dir string, out any) (agentRun, error) {
 	step, err := agent.LoadStep(e.StepsDir, name)
 	if err != nil {
-		return 0, fmt.Errorf("load step: %w", err)
+		return agentRun{}, fmt.Errorf("load step: %w", err)
 	}
 	prompt, err := step.Render(data)
 	if err != nil {
-		return 0, fmt.Errorf("render step: %w", err)
+		return agentRun{}, fmt.Errorf("render step: %w", err)
 	}
+	run := agentRun{By: step.Runner + "/" + step.Model}
 	res, err := e.Runner.Run(ctx, step, prompt, dir)
 	if err != nil {
-		return 0, fmt.Errorf("run %s agent: %w", name, err)
+		return run, fmt.Errorf("run %s agent: %w", name, err)
 	}
+	run.Cost = res.CostUSD
 	if err := json.Unmarshal(res.Output, out); err != nil {
-		return res.CostUSD, fmt.Errorf("%s agent output: %w", name, err)
+		return run, fmt.Errorf("%s agent output: %w", name, err)
 	}
-	return res.CostUSD, nil
+	return run, nil
 }
 
 func short(sha string) string {

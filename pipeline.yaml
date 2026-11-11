@@ -4,14 +4,22 @@
 # Build rounds (each round is build, then CI, then review) before it escalates.
 max_rounds: 3
 
-# The models an agent step can be switched to from the Workflow page. Choosing
-# one rewrites that step file's model: line and nothing else. Steps read their
-# file on every run, so tickets in flight pick it up at their next run.
+# The models an agent step can be switched to from the Workflow page, per
+# runner. Choosing one rewrites that step file's runner: and model: lines and
+# nothing else. Steps read their file on every run, so tickets in flight pick
+# it up at their next run. cursor-cli runs read-only steps only (Cursor's ask
+# mode), so it isn't offered for build.
 models:
-  - claude-fable-5-1
-  - claude-opus-5-5
-  - claude-sonnet-5-5
-  - claude-haiku-5-5
+  claude-cli:
+    - claude-fable-5-1
+    - claude-opus-5-5
+    - claude-sonnet-5-5
+    - claude-haiku-5-5
+  cursor-cli:
+    - composer-2.5
+    - gpt-5.3-codex
+    - gpt-5.6-sol-high
+    - cursor-grok-4.5-high
 
 # After readiness, an agent writes a short spec, committed with the change as
 # specs/<ticket>.md. When does a human approve it before anything is built?

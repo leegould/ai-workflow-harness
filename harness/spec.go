@@ -53,14 +53,14 @@ func (e *Engine) spec(ctx context.Context, t *Ticket) error {
 		}
 	}
 	var out specOutput
-	cost, err := e.runAgent(ctx, "spec", req, dir, &out)
+	run, err := e.runAgent(ctx, "spec", req, dir, &out)
 	if err != nil {
 		return err
 	}
-	t.CostUSD += cost
+	t.CostUSD += run.Cost
 	t.Spec = out.markdown(t)
 	t.SpecFiles = out.Files
-	e.costEvent(ctx, t, "agent", fmt.Sprintf("Spec written: %d decisions, %d files planned", len(out.Decisions), len(out.Files)), t.Spec, cost)
+	e.costEvent(ctx, t, "agent", fmt.Sprintf("Spec written: %d decisions, %d files planned", len(out.Decisions), len(out.Files)), t.Spec, run)
 
 	planned := make([]target.FileChange, len(out.Files))
 	for i, f := range out.Files {

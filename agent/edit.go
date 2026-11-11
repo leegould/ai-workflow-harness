@@ -10,12 +10,10 @@ import (
 
 var (
 	ErrEditNoMatch = errors.New("the text to replace must appear exactly once in the prompt")
-	ErrNoModelLine = errors.New("frontmatter must have exactly one top-level model: line")
+	// ErrNoSettingLine: only top-level lines match, so a "model:" key inside a
+	// schema is never touched.
+	ErrNoSettingLine = errors.New("frontmatter must have exactly one top-level line for")
 )
-
-// modelLine is the top-level model setting; indented "model:" keys (inside a
-// schema, say) don't match.
-var modelLine = regexp.MustCompile(`(?m)^model:[^\n]*$`)
 
 // PromptBody returns a step's prompt: the part after the frontmatter.
 func PromptBody(dir, name string) (string, error) {
@@ -57,10 +55,10 @@ func EditPrompt(dir, name, find, replace string) error {
 	return nil
 }
 
-// SetModel changes the model a step runs on. It rewrites that one line of the
-// frontmatter and nothing else, so tools, permissions and budget stay as
-// reviewed, and the change shows up as a one-line diff.
-func SetModel(dir, name, model string) error {
+// SetRunnerModel changes which runner and model a step runs on. It rewrites
+// those two lines of the frontmatter and nothing else, so tools, permissions
+// and budget stay as reviewed, and the change shows up as a small diff.
+func SetRunnerModel(dir, name, runner, model string) error {
 	raw, err := readStep(dir, name)
 	if err != nil {
 		return err
@@ -69,17 +67,20 @@ func SetModel(dir, name, model string) error {
 	if !ok {
 		return fmt.Errorf("step %s: missing --- frontmatter", name)
 	}
-	if len(modelLine.FindAllStringIndex(front, -1)) != 1 {
-		return fmt.Errorf("step %s: %w", name, ErrNoModelLine)
+	for _, kv := range [][2]string{{"runner", runner}, {"model", model}} {
+		line := regexp.MustCompile(`(?m)^` + kv[0] + `:[^\n]*$`)
+		if len(line.FindAllStringIndex(front, -1)) != 1 {
+			return fmt.Errorf("step %s: %w: %s", name, ErrNoSettingLine, kv[0])
+		}
+		front = line.ReplaceAllLiteralString(front, kv[0]+": "+kv[1])
 	}
-	front = modelLine.ReplaceAllLiteralString(front, "model: "+model)
 	updated := "---\n" + front + "\n---\n" + body
 	s, err := parseStep(name, updated)
 	if err != nil {
-		return fmt.Errorf("model change would break step %s: %w", name, err)
+		return fmt.Errorf("change would break step %s: %w", name, err)
 	}
-	if s.Model != model {
-		return fmt.Errorf("step %s: model reads back as %q, not %q", name, s.Model, model)
+	if s.Runner != runner || s.Model != model {
+		return fmt.Errorf("step %s: reads back as %s/%s, not %s/%s", name, s.Runner, s.Model, runner, model)
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {

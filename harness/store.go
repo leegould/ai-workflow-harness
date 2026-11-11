@@ -41,6 +41,22 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_ticket ON events (ticket, id);
 `
 
+// migrate brings an older database up to date. Events gained a model column
+// after the first tickets ran; old rows get "".
+func migrate(db *sql.DB) error {
+	ctx := context.Background()
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'model'`).Scan(&n); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	if n == 0 {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN model TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+	return nil
+}
+
 // Open opens (or creates) the store at path. ":memory:" works for tests.
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
@@ -53,6 +69,10 @@ func Open(path string) (*Store, error) {
 	if _, err := db.ExecContext(context.Background(), schema+proposalSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
+	}
+	if err := migrate(db); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	return &Store{db: db}, nil
 }
@@ -210,8 +230,8 @@ func (s *Store) Recover(ctx context.Context) (int, error) {
 }
 
 func (s *Store) AddEvent(ctx context.Context, e Event) error {
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO events (ticket, at, step, kind, message, detail, cost) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		e.Ticket, e.At.UnixMilli(), e.Step, e.Kind, e.Message, e.Detail, e.CostUSD); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO events (ticket, at, step, kind, message, detail, cost, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.Ticket, e.At.UnixMilli(), e.Step, e.Kind, e.Message, e.Detail, e.CostUSD, e.By); err != nil {
 		return fmt.Errorf("add event: %w", err)
 	}
 	return nil
@@ -219,7 +239,7 @@ func (s *Store) AddEvent(ctx context.Context, e Event) error {
 
 // Events returns a ticket's timeline, oldest first.
 func (s *Store) Events(ctx context.Context, id string) ([]Event, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, ticket, at, step, kind, message, detail, cost FROM events WHERE ticket = ? ORDER BY id`, id)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, ticket, at, step, kind, message, detail, cost, model FROM events WHERE ticket = ? ORDER BY id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("events %s: %w", id, err)
 	}
@@ -228,7 +248,7 @@ func (s *Store) Events(ctx context.Context, id string) ([]Event, error) {
 	for rows.Next() {
 		var e Event
 		var at int64
-		if err := rows.Scan(&e.ID, &e.Ticket, &at, &e.Step, &e.Kind, &e.Message, &e.Detail, &e.CostUSD); err != nil {
+		if err := rows.Scan(&e.ID, &e.Ticket, &at, &e.Step, &e.Kind, &e.Message, &e.Detail, &e.CostUSD, &e.By); err != nil {
 			return nil, fmt.Errorf("events %s: %w", id, err)
 		}
 		e.At = time.UnixMilli(at)

@@ -63,7 +63,7 @@ func run(addr, db, targetDir, seed, steps, config string, workers int) error {
 	engine := &harness.Engine{
 		Store:    store,
 		Repo:     local,
-		Runner:   agent.Runners{"claude-cli": agent.ClaudeCLI{}},
+		Runner:   agent.Runners{"claude-cli": agent.ClaudeCLI{}, "cursor-cli": agent.CursorCLI{}},
 		StepsDir: steps,
 		Config:   cfg,
 	}

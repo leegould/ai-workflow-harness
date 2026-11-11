@@ -126,6 +126,7 @@ async function refreshTicket() {
     el("div", { class: "ev-head" },
       el("span", { class: "ev-step" }, STEP_LABEL[e.step] || e.step),
       el("span", {}, e.message),
+      e.by ? el("span", { class: "ev-cost" }, e.by.replace("/", " · ")) : null,
       e.costUSD ? el("span", { class: "ev-cost" }, `$${e.costUSD.toFixed(3)}`) : null,
       el("span", { class: "ev-time", title: new Date(e.at).toLocaleString() }, ago(e.at))),
     e.detail ? details(e) : null)));
@@ -204,6 +205,7 @@ function label(t, a) {
 }
 
 const KIND_LABEL = { agent: "Agent", check: "Check", gate: "Gate", ship: "Ship" };
+const RUNNER_LABEL = { "claude-cli": "Claude Code", "cursor-cli": "Cursor (read-only)" };
 
 async function refreshWorkflow() {
   const wf = await api("/api/workflow");
@@ -212,15 +214,23 @@ async function refreshWorkflow() {
     const status = el("span", { class: "saved" });
     let agent = null;
     if (s.agent) {
-      const models = wf.models.includes(s.agent.model) ? wf.models : [s.agent.model, ...wf.models];
+      // One group per runner this step can use; a value is "runner|model".
+      const current = `${s.agent.runner}|${s.agent.model}`;
+      const groups = s.agent.runners.map((r) => {
+        const models = wf.models[r] || [];
+        if (r === s.agent.runner && !models.includes(s.agent.model)) models.unshift(s.agent.model);
+        return el("optgroup", { label: RUNNER_LABEL[r] || r },
+          ...models.map((m) => { const o = el("option", { value: `${r}|${m}` }, m); o.selected = `${r}|${m}` === current; return o; }));
+      });
       const select = el("select", { "aria-label": `Model for ${s.label}`, onchange: async () => {
+        const [runner, model] = select.value.split("|");
         status.className = "saved";
         status.textContent = "Saving…";
         try {
-          await api(`/api/workflow/steps/${s.agent.step}/model`, { model: select.value });
-          status.textContent = `Saved: the next ${s.label.toLowerCase()} run uses ${select.value}`;
-        } catch (e) { status.className = "saved error"; status.textContent = e.message; select.value = s.agent.model; }
-      } }, ...models.map((m) => { const o = el("option", { value: m }, m); o.selected = m === s.agent.model; return o; }));
+          await api(`/api/workflow/steps/${s.agent.step}/model`, { runner, model });
+          status.textContent = `Saved: the next ${s.label.toLowerCase()} run uses ${model} via ${RUNNER_LABEL[runner] || runner}`;
+        } catch (e) { status.className = "saved error"; status.textContent = e.message; select.value = current; }
+      } }, ...groups);
       agent = el("div", { class: "agent-cfg" },
         el("label", { class: "model" }, "Model", select),
         el("span", { class: "muted" }, `tools: ${s.agent.tools.length ? s.agent.tools.join(", ") : "none"}`),

@@ -141,12 +141,12 @@ func Server(e *Engine, posterPage string) http.Handler {
 	})
 
 	mux.HandleFunc("POST /api/workflow/steps/{step}/model", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Model string }
+		var in struct{ Runner, Model string }
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			fail(w, http.StatusBadRequest, err)
 			return
 		}
-		if err := e.SetModel(r.PathValue("step"), in.Model); err != nil {
+		if err := e.SetModel(r.PathValue("step"), in.Runner, in.Model); err != nil {
 			fail(w, status(err), err)
 			return
 		}

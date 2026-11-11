@@ -194,11 +194,11 @@ func (e *Engine) retro(ctx context.Context, t *Ticket) error {
 		in.Prompts = append(in.Prompts, stepPrompt{Name: name, Body: body})
 	}
 	var out retroOutput
-	cost, err := e.runAgent(ctx, "retro", in, "", &out)
+	run, err := e.runAgent(ctx, "retro", in, "", &out)
 	if err != nil {
 		return err
 	}
-	t.CostUSD += cost
+	t.CostUSD += run.Cost
 	kept := 0
 	for _, p := range out.Proposals {
 		// Checked in code, not trusted: only editable steps, only prompt text,
@@ -223,7 +223,7 @@ func (e *Engine) retro(ctx context.Context, t *Ticket) error {
 	if kept > 0 {
 		msg = fmt.Sprintf("Retro: %d change(s) proposed, waiting in Improvements", kept)
 	}
-	e.costEvent(ctx, t, "retro", msg, out.Notes, cost)
+	e.costEvent(ctx, t, "retro", msg, out.Notes, run)
 	return nil
 }
 

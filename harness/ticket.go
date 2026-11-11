@@ -151,4 +151,5 @@ type Event struct {
 	Message string    `json:"message"`
 	Detail  string    `json:"detail,omitempty"`
 	CostUSD float64   `json:"costUSD,omitempty"`
+	By      string    `json:"by,omitempty"` // for agent runs: runner/model
 }

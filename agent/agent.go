@@ -109,6 +109,24 @@ var ErrUnknownRunner = errors.New("unknown runner")
 // Runners maps StepDef.Runner names to implementations.
 type Runners map[string]Runner
 
+// Checker is a runner that can only run some steps. Checking up front means a
+// step can't be switched to a runner that would refuse it later.
+type Checker interface {
+	Check(step StepDef) error
+}
+
+// Check reports whether step's runner exists and can run it.
+func (r Runners) Check(step StepDef) error {
+	impl, ok := r[step.Runner]
+	if !ok {
+		return fmt.Errorf("step %s: %w %q", step.Name, ErrUnknownRunner, step.Runner)
+	}
+	if c, ok := impl.(Checker); ok {
+		return c.Check(step) //nolint:wrapcheck // the runner's error already names the step
+	}
+	return nil
+}
+
 func (r Runners) Run(ctx context.Context, step StepDef, prompt, dir string) (AgentResult, error) {
 	impl, ok := r[step.Runner]
 	if !ok {

@@ -3,6 +3,7 @@ package harness
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"aiharness/agent"
@@ -21,18 +22,21 @@ type WorkflowStep struct {
 	Agent   *AgentInfo `json:"agent,omitempty"`
 }
 
-// AgentInfo is what an agent step runs with, read from its step file.
+// AgentInfo is what an agent step runs with, read from its step file, and
+// which runners it could be switched to.
 type AgentInfo struct {
 	Step      string   `json:"step"`
+	Runner    string   `json:"runner"`
 	Model     string   `json:"model"`
 	Tools     []string `json:"tools"`
 	BudgetUSD float64  `json:"budgetUSD"`
+	Runners   []string `json:"runners"`
 }
 
 type Workflow struct {
-	Steps  []WorkflowStep `json:"steps"`
-	Retro  WorkflowStep   `json:"retro"`
-	Models []string       `json:"models"`
+	Steps  []WorkflowStep      `json:"steps"`
+	Retro  WorkflowStep        `json:"retro"`
+	Models map[string][]string `json:"models"`
 }
 
 // Workflow describes the flow as it runs now: the steps in order, the gates
@@ -94,24 +98,48 @@ func (e *Engine) agentInfo(name string) (AgentInfo, error) {
 	if err != nil {
 		return AgentInfo{}, fmt.Errorf("load step: %w", err)
 	}
-	return AgentInfo{Step: name, Model: s.Model, Tools: s.Tools, BudgetUSD: s.MaxBudgetUSD}, nil
+	info := AgentInfo{Step: name, Runner: s.Runner, Model: s.Model, Tools: s.Tools, BudgetUSD: s.MaxBudgetUSD}
+	for _, runner := range slices.Sorted(maps.Keys(e.Config.Models)) {
+		alt := s
+		alt.Runner = runner
+		if e.checkRunner(alt) == nil {
+			info.Runners = append(info.Runners, runner)
+		}
+	}
+	return info, nil
+}
+
+// checkRunner asks the runner whether it can run step, when it can say.
+func (e *Engine) checkRunner(step agent.StepDef) error {
+	if c, ok := e.Runner.(agent.Checker); ok {
+		return c.Check(step) //nolint:wrapcheck // names the step and runner already
+	}
+	return nil
 }
 
 // agentSteps are the steps whose model can be chosen.
 var agentSteps = []string{"readiness", "spec", "build", "retro"}
 
-// SetModel changes the model an agent step runs on, from the models
-// pipeline.yaml allows. It edits only the step file's model line, so it's a
-// one-line diff in git. Tickets in flight use it from their next run of that
-// step.
-func (e *Engine) SetModel(step, model string) error {
+// SetModel changes the runner and model an agent step runs on, from the ones
+// pipeline.yaml allows, and only to a runner that can run that step. It edits
+// only the step file's runner and model lines, so it's a small diff in git.
+// Tickets in flight use it from their next run of that step.
+func (e *Engine) SetModel(step, runner, model string) error {
 	if !slices.Contains(agentSteps, step) {
 		return fmt.Errorf("%w: %s isn't an agent step", ErrBadModel, step)
 	}
-	if !slices.Contains(e.Config.Models, model) {
-		return fmt.Errorf("%w: %s isn't in the models pipeline.yaml allows", ErrBadModel, model)
+	if !slices.Contains(e.Config.Models[runner], model) {
+		return fmt.Errorf("%w: %s/%s isn't in the models pipeline.yaml allows", ErrBadModel, runner, model)
 	}
-	if err := agent.SetModel(e.StepsDir, step, model); err != nil {
+	def, err := agent.LoadStep(e.StepsDir, step)
+	if err != nil {
+		return fmt.Errorf("load step: %w", err)
+	}
+	def.Runner, def.Model = runner, model
+	if err := e.checkRunner(def); err != nil {
+		return fmt.Errorf("%w: %w", ErrBadModel, err)
+	}
+	if err := agent.SetRunnerModel(e.StepsDir, step, runner, model); err != nil {
 		return fmt.Errorf("set model: %w", err)
 	}
 	return nil

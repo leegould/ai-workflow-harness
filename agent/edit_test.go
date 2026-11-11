@@ -68,16 +68,16 @@ func TestEditPromptRefuses(t *testing.T) {
 	}
 }
 
-func TestSetModelChangesOnlyTheModelLine(t *testing.T) {
+func TestSetRunnerModelChangesOnlyThoseLines(t *testing.T) {
 	dir := stepsCopy(t)
 	before, _ := os.ReadFile(filepath.Join(dir, "spec.md")) //nolint:gosec // test copy
-	if err := SetModel(dir, "spec", "claude-haiku-5-5"); err != nil {
+	if err := SetRunnerModel(dir, "spec", "cursor-cli", "composer-2.5"); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(filepath.Join(dir, "spec.md")) //nolint:gosec // test copy
 	s, err := LoadStep(dir, "spec")
-	if err != nil || s.Model != "claude-haiku-5-5" {
-		t.Fatalf("got %q %v", s.Model, err)
+	if err != nil || s.Runner != "cursor-cli" || s.Model != "composer-2.5" {
+		t.Fatalf("got %s/%s %v", s.Runner, s.Model, err)
 	}
 	b, a := strings.Split(string(before), "\n"), strings.Split(string(after), "\n")
 	changed := 0
@@ -86,13 +86,13 @@ func TestSetModelChangesOnlyTheModelLine(t *testing.T) {
 			changed++
 		}
 	}
-	if len(a) != len(b) || changed != 1 {
-		t.Fatalf("want a one-line change, got %d lines changed", changed)
+	if len(a) != len(b) || changed != 2 {
+		t.Fatalf("want a two-line change, got %d lines changed", changed)
 	}
-	if err := SetModel(dir, "spec", "x\ntools: [Bash]"); err == nil {
+	if err := SetRunnerModel(dir, "spec", "claude-cli", "x\ntools: [Bash]"); err == nil {
 		t.Fatal("a model that injects frontmatter must be refused")
 	}
-	if err := SetModel(dir, "missing", "claude-haiku-5-5"); err == nil {
+	if err := SetRunnerModel(dir, "missing", "claude-cli", "claude-haiku-5-5"); err == nil {
 		t.Fatal("expected an error for a missing step")
 	}
 }
