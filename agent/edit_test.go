@@ -71,12 +71,13 @@ func TestEditPromptRefuses(t *testing.T) {
 func TestSetRunnerModelChangesOnlyThoseLines(t *testing.T) {
 	dir := stepsCopy(t)
 	before, _ := os.ReadFile(filepath.Join(dir, "spec.md")) //nolint:gosec // test copy
-	if err := SetRunnerModel(dir, "spec", "cursor-cli", "composer-2.5"); err != nil {
+	// Values no step file uses, so the test doesn't depend on what spec.md is set to.
+	if err := SetRunnerModel(dir, "spec", "test-runner", "test-model"); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(filepath.Join(dir, "spec.md")) //nolint:gosec // test copy
 	s, err := LoadStep(dir, "spec")
-	if err != nil || s.Runner != "cursor-cli" || s.Model != "composer-2.5" {
+	if err != nil || s.Runner != "test-runner" || s.Model != "test-model" {
 		t.Fatalf("got %s/%s %v", s.Runner, s.Model, err)
 	}
 	b, a := strings.Split(string(before), "\n"), strings.Split(string(after), "\n")

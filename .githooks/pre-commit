@@ -1,9 +1,29 @@
 #!/bin/sh
-# Runs `make check` on exactly what's being committed: the staged files,
-# copied out of the index. Unstaged edits can't make a commit pass or fail,
-# and the gate doesn't depend on whoever is committing saying they ran it.
-# Install with `make hooks`.
+# Two gates, the same ones the harness applies to the code it builds:
+#
+# 1. The rules are protected. On main, a commit may not touch the files that
+#    define how the harness and its agents behave (prompts, gates, config,
+#    the checks themselves, dependencies). Those go on a branch, a human
+#    approves the diff, and it's merged with `git merge --no-ff`, which runs
+#    the pre-merge-commit hook instead of this check.
+# 2. `make check` runs on exactly what's being committed: the staged files,
+#    copied out of the index, so unstaged edits can't make it pass or fail.
+#
+# Install with `make hooks`. This file is itself protected.
 set -eu
+
+protected='^(pipeline\.yaml|steps/|CLAUDE\.md|\.golangci\.yml|Makefile|tools/|go\.mod|go\.sum|\.githooks/|\.github/)'
+
+if [ "${HARNESS_MERGE:-}" != 1 ] && [ "$(git symbolic-ref --short -q HEAD || true)" = main ]; then
+	hits=$(git diff --cached --name-only | grep -E "$protected" || true)
+	if [ -n "$hits" ]; then
+		echo "pre-commit: these are protected and can't be committed straight to main:" >&2
+		echo "$hits" | sed 's/^/  /' >&2
+		echo "Commit on a branch (git switch -c <name>), get the diff approved, then git merge --no-ff." >&2
+		exit 1
+	fi
+fi
+
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 git checkout-index -a --prefix="$tmp/"

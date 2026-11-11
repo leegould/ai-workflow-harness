@@ -1,0 +1,5 @@
+#!/bin/sh
+# A merge commit is how an approved branch reaches main, so it skips the
+# protected-paths rule but still runs `make check` on the merged result.
+# Fast-forward merges make no commit and run no hook: always merge with --no-ff.
+HARNESS_MERGE=1 exec "$(dirname "$0")/pre-commit"

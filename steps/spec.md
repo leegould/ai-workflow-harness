@@ -5,8 +5,8 @@
 # so the agent needs no write access. The files it plans are checked against
 # the risk rules (to decide whether a human approves the spec first) and
 # against what the build really changes.
-runner: claude-cli
-model: claude-sonnet-5-5
+runner: cursor-cli
+model: gpt-5.3-codex
 tools: [Read, Glob, Grep]
 max_budget_usd: 0.40
 schema:
