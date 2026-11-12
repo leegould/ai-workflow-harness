@@ -53,6 +53,8 @@ async function refreshList() {
   const [tickets, stats] = await Promise.all([api("/api/tickets"), api("/api/stats")]);
   $("improve-count").textContent = stats.openProposals || "";
   $("improve-link").classList.toggle("active", selected === "improvements");
+  $("releases-link").classList.toggle("active", selected === "releases");
+  $("releases-count").textContent = tickets.filter((t) => t.wait === "promote").length || "";
   $("workflow-link").classList.toggle("active", !selected && $("create").hidden);
   $("tickets").replaceChildren(...tickets.map((t) => el("a", { href: `#${t.id}`, class: t.id === selected ? "active" : "" },
     el("div", { class: "t-title" }, el("span", { class: `dot ${dotClass(t)}` }), t.title),
@@ -91,6 +93,7 @@ async function refreshImprovements() {
 async function refreshTicket() {
   if (!selected) { show("workflow"); return shownWorkflow ? null : refreshWorkflow(); }
   if (selected === "improvements") { show("improvements"); return refreshImprovements(); }
+  if (selected === "releases") { show("releases"); return refreshReleases(); }
   let data;
   try { data = await api(`/api/tickets/${selected}`); } catch { selected = null; return refreshTicket(); }
   const { ticket: t, events, actions } = data;
@@ -266,8 +269,39 @@ async function refreshWorkflow() {
   $("flow-retro").replaceChildren(el("ol", { class: "flow" }, card(wf.retro)));
 }
 
+const RELEASE_STATE = { ready: "Ready to ship", testing: "Testing on dev", "needs-you": "Needs you" };
+
+async function refreshReleases() {
+  const rel = await api("/api/releases");
+  const env = (name, sha, link) => el("div", { class: "stat" },
+    el("b", { class: "mono" }, sha ? sha.slice(0, 7) : "–"),
+    el("span", {}, name, " ", sha ? el("a", { href: link, target: "_blank" }, "open ↗") : "(nothing deployed)"));
+  $("envs").replaceChildren(env("production", rel.production, "/poster/production"), env("dev", rel.dev, "/poster/dev"));
+  if (!rel.items.length) {
+    return $("release-items").replaceChildren(el("p", { class: "muted" }, "Nothing waiting: production has everything that's been merged."));
+  }
+  $("release-items").replaceChildren(el("ol", { class: "flow" }, ...rel.items.map((it) => {
+    const t = it.ticket;
+    const err = el("span", { class: "error" });
+    const ship = async () => {
+      const also = it.ships.length ? ` This also ships ${it.ships.join(", ")}.` : "";
+      if (!confirm(`Ship ${t.id} to production?${also}`)) return;
+      try { await api(`/api/tickets/${t.id}/actions`, { action: "promote", comment: "" }); tick(); } catch (e) { err.textContent = e.message; }
+    };
+    return el("li", { class: `flow-step ${it.state === "ready" ? "check" : it.state === "needs-you" ? "gate" : "agent"}` },
+      el("div", { class: "flow-head" },
+        el("a", { href: `#${t.id}` }, el("b", {}, `${t.id}: ${t.title}`)),
+        el("span", { class: "kind" }, RELEASE_STATE[it.state] || it.state),
+        el("span", { class: "mono muted" }, t.merged ? `merged ${t.merged.slice(0, 7)}` : "")),
+      it.ships.length ? el("p", { class: "muted" }, `Shipping this also ships ${it.ships.join(", ")}.`) : null,
+      it.blocked ? el("p", { class: "error" }, `Can't ship yet: ${it.blocked}.`) : null,
+      it.state === "ready" && !it.blocked ? el("div", { class: "row" },
+        el("button", { class: "primary", onclick: ship }, it.ships.length ? "Ship up to here" : "Ship to production"), err) : null);
+  })));
+}
+
 function show(id) {
-  for (const s of ["create", "ticket", "improvements", "workflow"]) $(s).hidden = s !== id;
+  for (const s of ["create", "ticket", "improvements", "releases", "workflow"]) $(s).hidden = s !== id;
 }
 
 async function tick() {
@@ -291,7 +325,7 @@ window.addEventListener("hashchange", () => {
   shownWait = undefined;
   shownVerdict = undefined;
   shownWorkflow = false;
-  show(!selected ? "workflow" : selected === "improvements" ? "improvements" : "ticket");
+  show(!selected ? "workflow" : ["improvements", "releases"].includes(selected) ? selected : "ticket");
   tick();
 });
 

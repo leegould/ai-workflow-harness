@@ -11,6 +11,7 @@
   <div class="brand">Harness</div>
   <button class="new" id="new-ticket">+ New ticket</button>
   <a class="improve-link" id="workflow-link" href="#">Workflow</a>
+  <a class="improve-link" id="releases-link" href="#releases">Releases <span class="count" id="releases-count"></span></a>
   <a class="improve-link" id="improve-link" href="#improvements">Improvements <span class="count" id="improve-count"></span></a>
   <div class="nav-head">Tickets</div>
   <nav id="tickets" aria-label="Tickets"></nav>
@@ -44,6 +45,13 @@
     <details class="desc"><summary>Description</summary><pre id="t-desc"></pre></details>
     <h2>Timeline</h2>
     <ol class="timeline" id="t-events"></ol>
+  </section>
+
+  <section id="releases" class="panel" hidden>
+    <h1>Releases</h1>
+    <p class="muted">Every merge goes to dev. These are merged but not in production yet, oldest merge first. Shipping one deploys main as of its merge, so everything above it ships too, and it can't ship until all of that has passed on dev.</p>
+    <div class="stats" id="envs"></div>
+    <div id="release-items"></div>
   </section>
 
   <section id="improvements" class="panel" hidden>

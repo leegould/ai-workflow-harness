@@ -136,6 +136,15 @@ func TestMergeDeploySmokeRevert(t *testing.T) {
 	if smoke, _ := l.Smoke(ctx, Dev); !smoke.Passed {
 		t.Fatalf("smoke failed after revert: %s", smoke.Log)
 	}
+	if ok, err := l.Contains(ctx, broken, merged); err != nil || !ok {
+		t.Fatalf("later merge should contain the earlier one: %v %v", ok, err)
+	}
+	if ok, err := l.Contains(ctx, merged, broken); err != nil || ok {
+		t.Fatalf("earlier merge shouldn't contain the later one: %v %v", ok, err)
+	}
+	if _, err := l.Contains(ctx, merged, "nope"); err == nil {
+		t.Fatal("expected an error for a bad commit")
+	}
 	if _, err := l.Deploy(ctx, "staging", "main"); !errors.Is(err, ErrUnknownEnv) {
 		t.Fatalf("unknown env: got %v", err)
 	}

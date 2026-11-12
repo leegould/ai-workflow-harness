@@ -145,6 +145,15 @@ func Server(e *Engine, posterPages map[string]string) http.Handler {
 		reply(w, http.StatusOK, p)
 	})
 
+	mux.HandleFunc("GET /api/releases", func(w http.ResponseWriter, r *http.Request) {
+		rel, err := e.Releases(r.Context())
+		if err != nil {
+			fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		reply(w, http.StatusOK, rel)
+	})
+
 	mux.HandleFunc("GET /api/stats", func(w http.ResponseWriter, r *http.Request) {
 		s, err := e.Stats(r.Context())
 		if err != nil {
