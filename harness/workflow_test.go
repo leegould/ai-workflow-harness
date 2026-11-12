@@ -25,7 +25,7 @@ func TestWorkflowShowsEachAgentStepsModel(t *testing.T) {
 			}
 		}
 	}
-	if len(wf.Steps) != 9 || len(agents) != 3 || wf.Retro.Agent == nil || len(wf.Models) == 0 {
+	if len(wf.Steps) != 11 || len(agents) != 3 || wf.Retro.Agent == nil || len(wf.Models) == 0 {
 		t.Fatalf("got %d steps, agents %v, models %v", len(wf.Steps), agents, wf.Models)
 	}
 }
@@ -82,7 +82,7 @@ type fakeCursor struct{ fakeAgent }
 func (fakeCursor) Check(step agent.StepDef) error { return agent.CursorCLI{}.Check(step) }
 
 func TestWorkflowAPI(t *testing.T) {
-	srv := Server(newHarness(t).e, "")
+	srv := Server(newHarness(t).e, nil)
 	if code, out := call(t, srv, "GET", "/api/workflow", ""); code != http.StatusOK || out["steps"] == nil {
 		t.Fatalf("workflow: %d %v", code, out)
 	}

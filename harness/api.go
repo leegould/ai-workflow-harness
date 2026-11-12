@@ -14,9 +14,9 @@ import (
 //go:embed ui
 var uiFiles embed.FS
 
-// Server is the HTTP API plus the UI. PosterPage is the deployed app's output,
-// so the UI can show what each ticket actually shipped.
-func Server(e *Engine, posterPage string) http.Handler {
+// Server is the HTTP API plus the UI. posterPages are the deployed app's
+// output in each environment, so the UI can show what each ticket shipped.
+func Server(e *Engine, posterPages map[string]string) http.Handler {
 	mux := http.NewServeMux()
 	ui, _ := fs.Sub(uiFiles, "ui")
 	mux.Handle("GET /", http.FileServerFS(ui))
@@ -181,13 +181,22 @@ func Server(e *Engine, posterPage string) http.Handler {
 		reply(w, http.StatusOK, wf)
 	})
 
-	mux.HandleFunc("GET /poster", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := os.Stat(posterPage); err != nil {
-			http.Error(w, "Nothing deployed yet.", http.StatusNotFound)
-			return
+	poster := func(env string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			page, ok := posterPages[env]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			if _, err := os.Stat(page); err != nil {
+				http.Error(w, "Nothing deployed to "+env+" yet.", http.StatusNotFound)
+				return
+			}
+			http.ServeFile(w, r, page)
 		}
-		http.ServeFile(w, r, posterPage)
-	})
+	}
+	mux.HandleFunc("GET /poster", poster("production"))
+	mux.HandleFunc("GET /poster/{env}", func(w http.ResponseWriter, r *http.Request) { poster(r.PathValue("env"))(w, r) })
 	return mux
 }
 

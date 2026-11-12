@@ -66,8 +66,26 @@ func DefaultDir() string {
 	return filepath.Join(home, ".cache", "ai-workflow-harness-target")
 }
 
-func (l Local) Origin() string    { return filepath.Join(l.Dir, "origin.git") }
-func (l Local) DeployDir() string { return filepath.Join(l.Dir, "deploy") }
+func (l Local) Origin() string { return filepath.Join(l.Dir, "origin.git") }
+
+// Environments a change is deployed to: every merge goes to dev, and
+// production gets a commit that has already passed there.
+const (
+	Dev        = "dev"
+	Production = "production"
+)
+
+var ErrUnknownEnv = errors.New("unknown environment")
+
+// DeployDir is where env's running version lives.
+func (l Local) DeployDir(env string) string { return filepath.Join(l.Dir, "deploy", env) }
+
+func checkEnv(env string) error {
+	if env != Dev && env != Production {
+		return fmt.Errorf("%w: %q", ErrUnknownEnv, env)
+	}
+	return nil
+}
 
 // Checkout gives an agent a clean checkout of branch in work/<key>, starting
 // from main if the branch doesn't exist yet. Anything left over from an
@@ -145,10 +163,13 @@ func (l Local) onMain(ctx context.Context, args []string) (string, error) {
 	return git(ctx, dir, "rev-parse", "HEAD")
 }
 
-// Deploy builds main and swaps it in as the running version. It returns the
-// deployed commit.
-func (l Local) Deploy(ctx context.Context) (string, error) {
-	src, cleanup, err := l.clone(ctx, "main")
+// Deploy builds ref (a branch or commit) and swaps it in as env's running
+// version. It returns the deployed commit.
+func (l Local) Deploy(ctx context.Context, env, ref string) (string, error) {
+	if err := checkEnv(env); err != nil {
+		return "", err
+	}
+	src, cleanup, err := l.clone(ctx, ref)
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +178,7 @@ func (l Local) Deploy(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dst := l.DeployDir()
+	dst := l.DeployDir(env)
 	if err := os.MkdirAll(dst, 0o750); err != nil {
 		return "", fmt.Errorf("deploy dir: %w", err)
 	}
@@ -184,12 +205,30 @@ func (l Local) Deploy(ctx context.Context) (string, error) {
 	return sha, nil
 }
 
-// Smoke runs the deployed binary the way the README says to and checks it
+// Deployed returns the commit running in env, or "" if nothing is.
+func (l Local) Deployed(_ context.Context, env string) (string, error) {
+	if err := checkEnv(env); err != nil {
+		return "", err
+	}
+	raw, err := os.ReadFile(filepath.Join(l.DeployDir(env), "DEPLOYED"))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read deployed: %w", err)
+	}
+	return strings.TrimSpace(string(raw)), nil
+}
+
+// Smoke runs env's deployed binary the way the README says to and checks it
 // produced a page.
-func (l Local) Smoke(ctx context.Context) (SmokeResult, error) {
+func (l Local) Smoke(ctx context.Context, env string) (SmokeResult, error) {
+	if err := checkEnv(env); err != nil {
+		return SmokeResult{}, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	dst := l.DeployDir()
+	dst := l.DeployDir(env)
 	page := filepath.Join(dst, "poster.html")
 	_ = os.Remove(page)
 	out, err := run(ctx, dst, "./poster", "-in", "poster.json", "-out", "poster.html")

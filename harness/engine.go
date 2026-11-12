@@ -32,8 +32,11 @@ type Repo interface {
 	ChangedFiles(ctx context.Context, branch string) ([]target.FileChange, error)
 	Merge(ctx context.Context, branch, message string) (sha string, err error)
 	Revert(ctx context.Context, mergeSHA string) (sha string, err error)
-	Deploy(ctx context.Context) (sha string, err error)
-	Smoke(ctx context.Context) (target.SmokeResult, error)
+	// Deploy builds ref (a branch or commit) and runs it in env (target.Dev
+	// or target.Production).
+	Deploy(ctx context.Context, env, ref string) (sha string, err error)
+	Deployed(ctx context.Context, env string) (sha string, err error)
+	Smoke(ctx context.Context, env string) (target.SmokeResult, error)
 }
 
 // Engine moves tickets through their steps. Each call to process runs one
@@ -167,6 +170,12 @@ func (e *Engine) step(ctx context.Context, t *Ticket) error {
 		return e.deploy(ctx, t)
 	case StepSmoke:
 		return e.smoke(ctx, t)
+	case StepPromote:
+		return e.promote(ctx, t)
+	case StepRelease:
+		return e.release(ctx, t)
+	case StepRevert:
+		return e.revert(ctx, t)
 	case StepResume:
 		return e.resume(ctx, t)
 	}
@@ -338,13 +347,6 @@ func (e *Engine) risk(ctx context.Context, t *Ticket) error {
 	// The spec itself is the harness's own file, not a change to judge.
 	changes := slices.DeleteFunc(all, func(c target.FileChange) bool { return c.Path == specPath(t.ID) })
 	level, why := e.Config.Risk.Assess(changes)
-	if t.Reactive {
-		if level == Low {
-			why = nil
-		}
-		level = max(level, Medium)
-		why = append(why, "medium: raised by "+t.Source+", so a human approves the fix before it merges")
-	}
 	if extra := unplanned(t.SpecFiles, changes); len(extra) > 0 {
 		if level == Low {
 			why = nil
@@ -377,44 +379,137 @@ func (e *Engine) merge(ctx context.Context, t *Ticket) error {
 	return nil
 }
 
+// deploy puts the merge on dev. Every merge goes there; production is a
+// separate step.
 func (e *Engine) deploy(ctx context.Context, t *Ticket) error {
-	sha, err := e.Repo.Deploy(ctx)
+	sha, err := e.Repo.Deploy(ctx, target.Dev, t.Merged)
 	if err != nil {
-		return fmt.Errorf("deploy: %w", err)
+		return fmt.Errorf("deploy to dev: %w", err)
 	}
 	t.Deployed = sha
-	e.event(ctx, t, "ship", "Deployed "+short(sha), "")
+	e.event(ctx, t, "ship", "Deployed "+short(sha)+" to dev", "")
 	e.next(t, StepSmoke)
 	return nil
 }
 
-// smoke checks the deployed version. On failure it reverts first, then asks:
-// main goes back to known-good before anyone is involved, and a retry starts
-// a fresh branch.
 func (e *Engine) smoke(ctx context.Context, t *Ticket) error {
-	res, err := e.Repo.Smoke(ctx)
+	res, err := e.Repo.Smoke(ctx, target.Dev)
 	if err != nil {
-		return fmt.Errorf("smoke test: %w", err)
+		return fmt.Errorf("smoke test on dev: %w", err)
 	}
 	if res.Passed {
-		e.event(ctx, t, "check", "Smoke test passed", res.Log)
+		e.event(ctx, t, "check", "Smoke test passed on dev", res.Log)
+		e.next(t, StepPromote)
+		return nil
+	}
+	reverted, err := e.takeBack(ctx, t)
+	if err != nil {
+		return err
+	}
+	e.event(ctx, t, "ship", fmt.Sprintf("Smoke test failed on dev: reverted %s and redeployed dev at %s", short(t.Merged), short(reverted)), res.Log)
+	e.sendBack(t, "Your last change was merged, failed the smoke test on dev and was reverted:\n"+res.Log)
+	e.wait(ctx, t, WaitEscalated, "Smoke test failed on dev. Main and dev are back on the last good version:\n"+res.Log)
+	return nil
+}
+
+// takeBack reverts the ticket's merge on main and redeploys dev from main.
+func (e *Engine) takeBack(ctx context.Context, t *Ticket) (string, error) {
+	reverted, err := e.Repo.Revert(ctx, t.Merged)
+	if err != nil {
+		return "", fmt.Errorf("revert: %w", err)
+	}
+	if t.Deployed, err = e.Repo.Deploy(ctx, target.Dev, "main"); err != nil {
+		return "", fmt.Errorf("deploy to dev: %w", err)
+	}
+	return reverted, nil
+}
+
+// sendBack readies a reverted ticket for another attempt on a fresh branch:
+// re-merging a reverted branch wouldn't bring its changes back.
+func (e *Engine) sendBack(t *Ticket, feedback string) {
+	t.Attempt++
+	t.Branch = ""
+	t.Merged = ""
+	t.Round = 0
+	t.Feedback = feedback
+}
+
+// promote is the production gate. With approval manual (the default) a human
+// looks at dev and decides; with auto, a change that passed on dev ships.
+func (e *Engine) promote(ctx context.Context, t *Ticket) error {
+	if e.Config.Production.Approval == ProductionAuto {
+		e.event(ctx, t, "gate", "Production approval is auto in pipeline.yaml", "")
+		return e.toProduction(ctx, t)
+	}
+	e.wait(ctx, t, WaitPromote, fmt.Sprintf("It's running on dev at %s and passed its smoke test there. Check it, then ship it to production, or send it back (that reverts it from main and dev).\n\nShipping deploys main as of this ticket's merge, so anything merged before it ships too.", short(t.Deployed)))
+	return nil
+}
+
+// toProduction notes what production runs now, to roll back to, and queues
+// the release.
+func (e *Engine) toProduction(ctx context.Context, t *Ticket) error {
+	prev, err := e.Repo.Deployed(ctx, target.Production)
+	if err != nil {
+		return fmt.Errorf("read production version: %w", err)
+	}
+	t.RollbackTo = prev
+	e.next(t, StepRelease)
+	return nil
+}
+
+// release deploys the ticket's merge to production and smoke tests it. On
+// failure, production goes back to what it ran before, and main and dev lose
+// the change, before a human is asked.
+func (e *Engine) release(ctx context.Context, t *Ticket) error {
+	sha, err := e.Repo.Deploy(ctx, target.Production, t.Merged)
+	if err != nil {
+		return fmt.Errorf("deploy to production: %w", err)
+	}
+	res, err := e.Repo.Smoke(ctx, target.Production)
+	if err != nil {
+		return fmt.Errorf("smoke test in production: %w", err)
+	}
+	if res.Passed {
+		t.Released = sha
+		e.event(ctx, t, "ship", "Released "+short(sha)+" to production", res.Log)
 		t.Status = Done
 		t.Outcome = "deployed"
 		t.Retro = RetroPending
 		return nil
 	}
-	reverted, err := e.Repo.Revert(ctx, t.Merged)
+	back := "nothing (it was the first release)"
+	if t.RollbackTo != "" {
+		if _, err := e.Repo.Deploy(ctx, target.Production, t.RollbackTo); err != nil {
+			return fmt.Errorf("roll back production: %w", err)
+		}
+		back = short(t.RollbackTo)
+	}
+	if _, err := e.takeBack(ctx, t); err != nil {
+		return err
+	}
+	e.event(ctx, t, "ship", "Smoke test failed in production: rolled production back to "+back+" and reverted main and dev", res.Log)
+	e.sendBack(t, "Your last change passed on dev but failed the smoke test in production, and was reverted:\n"+res.Log)
+	e.wait(ctx, t, WaitEscalated, "Smoke test failed in production. Production is back on "+back+", and main and dev no longer have the change:\n"+res.Log)
+	return nil
+}
+
+// revert takes the change back out at the human's request from the
+// production gate. Then it's built again with their guidance, or abandoned.
+func (e *Engine) revert(ctx context.Context, t *Ticket) error {
+	reverted, err := e.takeBack(ctx, t)
 	if err != nil {
-		return fmt.Errorf("revert: %w", err)
+		return err
 	}
-	if t.Deployed, err = e.Repo.Deploy(ctx); err != nil {
-		return fmt.Errorf("deploy: %w", err)
+	e.event(ctx, t, "ship", fmt.Sprintf("Reverted %s from main and dev (now %s)", short(t.Merged), short(reverted)), "")
+	if t.RetryAfterRevert {
+		t.RetryAfterRevert = false
+		e.sendBack(t, t.Feedback)
+		e.next(t, StepBuild)
+		return nil
 	}
-	e.event(ctx, t, "ship", fmt.Sprintf("Smoke test failed: reverted %s and redeployed %s", short(t.Merged), short(reverted)), res.Log)
-	t.Attempt++
-	t.Branch = ""
-	t.Feedback = "Your last change was merged, failed the smoke test after deploy and was reverted:\n" + res.Log
-	e.wait(ctx, t, WaitEscalated, "Smoke test failed after deploy. Main has been reverted to the last good version:\n"+res.Log)
+	t.Status = Abandoned
+	t.Outcome = "reverted"
+	t.Retro = RetroPending
 	return nil
 }
 
@@ -457,6 +552,10 @@ func (e *Engine) Act(ctx context.Context, id string, a Action, comment string) (
 		}
 		t.Description += "\n\nAnswers:\n" + comment
 		e.next(&t, StepRefinement)
+	case ActionPromote:
+		if err := e.toProduction(ctx, &t); err != nil {
+			return t, err
+		}
 	case ActionApprove:
 		if t.Wait == WaitSpec {
 			e.next(&t, StepBuild)
@@ -474,6 +573,16 @@ func (e *Engine) Act(ctx context.Context, id string, a Action, comment string) (
 			e.next(&t, t.Step)
 			break
 		}
+		if t.Wait == WaitPromote {
+			// Not right on dev: take it back out, then build again.
+			if comment == "" {
+				return t, fmt.Errorf("%w: say what's wrong on dev, for the builder", ErrInvalidAction)
+			}
+			t.Feedback = "It was merged and deployed to dev, and the human sent it back before production:\n" + comment
+			t.RetryAfterRevert = true
+			e.next(&t, StepRevert)
+			break
+		}
 		if comment != "" {
 			t.Feedback = strings.TrimSpace(t.Feedback + "\n\nHuman guidance:\n" + comment)
 		}
@@ -485,6 +594,10 @@ func (e *Engine) Act(ctx context.Context, id string, a Action, comment string) (
 	case ActionResume:
 		e.next(&t, StepResume)
 	case ActionAbandon:
+		if t.Wait == WaitPromote {
+			e.next(&t, StepRevert) // it's merged: take it back out before abandoning
+			break
+		}
 		t.Status = Abandoned
 		t.Outcome = "abandoned"
 		t.Retro = RetroPending

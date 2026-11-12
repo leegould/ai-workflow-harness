@@ -34,10 +34,16 @@ build ─▶ CI ─ fail ─▶ build (max 3 rounds, then escalate to a human)
         risk gate ─ medium/high ─▶ human approves
            │ low
            ▼
-        merge ─▶ deploy ─▶ smoke ─ fail ─▶ revert, redeploy, escalate (retry = fresh branch)
-                              │ pass
-                              ▼
-                           deployed
+        merge ─▶ deploy to dev ─▶ smoke ─ fail ─▶ revert, redeploy dev, escalate (retry = fresh branch)
+                                    │ pass
+                                    ▼
+                                 promote ─ manual ─▶ human ships it, or sends it back (revert, rebuild)
+                                    │ shipped (or auto)
+                                    ▼
+                                production ─ smoke fails ─▶ roll production back, revert main and dev, escalate
+                                    │ pass
+                                    ▼
+                                 deployed
 ```
 
 The UI's start page, **Workflow**, shows this flow as it runs now: each step, its loops
@@ -67,7 +73,8 @@ reason.
 | Build | Claude Code agent (`steps/build.md`): edit tools plus `go test/vet/build/run` and `gofmt` only. The harness commits and pushes |
 | CI | The harness runs gofmt, vet and tests on the pushed commit itself, whatever the agent says it ran |
 | Risk gate | **Deterministic floor from `pipeline.yaml`:** paths (agent rules, dependencies, the CLI the smoke test uses) and diff size. Changing a file the spec didn't plan makes it at least medium |
-| Merge, deploy, smoke, revert | Local git and go against the stand-in repo and a deploy folder |
+| Merge, deploy, smoke, revert | Local git and go against the stand-in repo, with a deploy folder each for dev and production |
+| Production gate | `production.approval` in `pipeline.yaml`: manual (the default) or auto. Production gets the exact commit that passed on dev, and a failure there rolls it back to what it ran before |
 | Review | Stub: approves unless the ticket says `never-approve` |
 
 ## Sources: where tickets come from
@@ -89,8 +96,9 @@ can raise a lot of tickets, so the guardrails are in code:
   sender gets a 429.
 - A problem that comes back after its fix was deployed opens a new ticket that names the
   fix that didn't hold, so the agents look at that change first.
-- The fix for a reactive ticket always waits for a human to approve the merge, whatever
-  the risk floor says. Here that's the local equivalent of "auto-fixes go to dev only".
+- A fix goes through the same gates as any change: a risk-assessed merge, then dev, then
+  the production gate. With production approval manual, an automatic fix reaches dev
+  by itself and production only when someone ships it.
 - With the source's signing secret set (`secret_env`), unsigned or wrongly signed reports
   are refused.
 

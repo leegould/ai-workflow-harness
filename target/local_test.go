@@ -2,6 +2,7 @@ package target
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,15 +86,21 @@ func TestMergeDeploySmokeRevert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deployed, err := l.Deploy(ctx)
+	if sha, err := l.Deployed(ctx, Dev); err != nil || sha != "" {
+		t.Fatalf("nothing deployed yet: got %q %v", sha, err)
+	}
+	deployed, err := l.Deploy(ctx, Dev, merged)
 	if err != nil || deployed != merged {
 		t.Fatalf("deployed %s, merged %s, %v", deployed, merged, err)
 	}
-	smoke, err := l.Smoke(ctx)
+	if sha, err := l.Deployed(ctx, Dev); err != nil || sha != merged {
+		t.Fatalf("deployed reads back %q %v", sha, err)
+	}
+	smoke, err := l.Smoke(ctx, Dev)
 	if err != nil || !smoke.Passed {
 		t.Fatalf("smoke: %+v %v", smoke, err)
 	}
-	page, err := os.ReadFile(filepath.Join(l.DeployDir(), "poster.html"))
+	page, err := os.ReadFile(filepath.Join(l.DeployDir(Dev), "poster.html"))
 	if err != nil || !strings.Contains(string(page), "Merged Title") {
 		t.Fatalf("page doesn't show the merged change: %v", err)
 	}
@@ -106,21 +113,31 @@ func TestMergeDeploySmokeRevert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Deploy(ctx); err != nil {
+	if _, err := l.Deploy(ctx, Dev, "main"); err != nil {
 		t.Fatal(err)
 	}
-	if smoke, _ := l.Smoke(ctx); smoke.Passed {
+	if smoke, _ := l.Smoke(ctx, Dev); smoke.Passed {
 		t.Fatal("smoke passed on a broken deploy")
+	}
+	// Production is separate: it still runs the good commit.
+	if _, err := l.Deploy(ctx, Production, merged); err != nil {
+		t.Fatal(err)
+	}
+	if smoke, _ := l.Smoke(ctx, Production); !smoke.Passed {
+		t.Fatalf("production smoke: %s", smoke.Log)
 	}
 	// ...and reverting it brings the working version back.
 	if _, err := l.Revert(ctx, broken); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Deploy(ctx); err != nil {
+	if _, err := l.Deploy(ctx, Dev, "main"); err != nil {
 		t.Fatal(err)
 	}
-	if smoke, _ := l.Smoke(ctx); !smoke.Passed {
+	if smoke, _ := l.Smoke(ctx, Dev); !smoke.Passed {
 		t.Fatalf("smoke failed after revert: %s", smoke.Log)
+	}
+	if _, err := l.Deploy(ctx, "staging", "main"); !errors.Is(err, ErrUnknownEnv) {
+		t.Fatalf("unknown env: got %v", err)
 	}
 }
 

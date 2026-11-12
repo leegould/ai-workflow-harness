@@ -26,8 +26,13 @@ const (
 	StepReview     Step = "review"
 	StepRisk       Step = "risk"
 	StepMerge      Step = "merge"
-	StepDeploy     Step = "deploy"
-	StepSmoke      Step = "smoke"
+	StepDeploy     Step = "deploy"  // to dev
+	StepSmoke      Step = "smoke"   // on dev
+	StepPromote    Step = "promote" // the production gate: a human, or auto
+	StepRelease    Step = "release" // deploy to production and smoke test it
+	// StepRevert takes a merged change back out of main and dev, when a human
+	// decides at the production gate that it shouldn't ship.
+	StepRevert Step = "revert"
 	// StepResume picks up a branch a human worked on, then goes to CI.
 	StepResume Step = "resume"
 )
@@ -40,6 +45,7 @@ const (
 	WaitSpec      Wait = "spec"      // a human approves the spec before the build
 	WaitEscalated Wait = "escalated" // the loop is stuck, or a deploy was reverted
 	WaitApproval  Wait = "approval"  // the risk gate
+	WaitPromote   Wait = "promote"   // running on dev: ship it to production?
 	WaitTakeover  Wait = "takeover"  // a human is working on the branch
 	WaitError     Wait = "error"     // a step kept failing for infrastructure reasons
 )
@@ -50,6 +56,7 @@ const (
 	ActionAnswer   Action = "answer"
 	ActionApprove  Action = "approve"
 	ActionRevise   Action = "revise"
+	ActionPromote  Action = "promote"
 	ActionRetry    Action = "retry"
 	ActionTakeOver Action = "takeover"
 	ActionResume   Action = "resume"
@@ -63,6 +70,7 @@ var actions = map[Wait][]Action{
 	WaitSpec:      {ActionApprove, ActionRevise, ActionAbandon},
 	WaitEscalated: {ActionRetry, ActionTakeOver, ActionAbandon},
 	WaitApproval:  {ActionApprove, ActionRetry, ActionTakeOver, ActionAbandon},
+	WaitPromote:   {ActionPromote, ActionRetry, ActionAbandon},
 	WaitTakeover:  {ActionResume, ActionAbandon},
 	WaitError:     {ActionRetry, ActionAbandon},
 }
@@ -80,17 +88,25 @@ type Ticket struct {
 	WaitText string `json:"waitText,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`
 
-	Round    int     `json:"round"`    // build rounds since the last human retry/resume; capped
-	Builds   int     `json:"builds"`   // build agent runs in total
-	Attempt  int     `json:"attempt"`  // which branch; a revert starts a new one
-	Failures int     `json:"failures"` // consecutive infrastructure failures of this step
-	Branch   string  `json:"branch,omitempty"`
-	SHA      string  `json:"sha,omitempty"`
-	Feedback string  `json:"feedback,omitempty"`
-	Risk     string  `json:"risk,omitempty"`
-	Merged   string  `json:"merged,omitempty"`
-	Deployed string  `json:"deployed,omitempty"`
-	CostUSD  float64 `json:"costUSD"`
+	Round    int    `json:"round"`    // build rounds since the last human retry/resume; capped
+	Builds   int    `json:"builds"`   // build agent runs in total
+	Attempt  int    `json:"attempt"`  // which branch; a revert starts a new one
+	Failures int    `json:"failures"` // consecutive infrastructure failures of this step
+	Branch   string `json:"branch,omitempty"`
+	SHA      string `json:"sha,omitempty"`
+	Feedback string `json:"feedback,omitempty"`
+	Risk     string `json:"risk,omitempty"`
+	Merged   string `json:"merged,omitempty"`
+	Deployed string `json:"deployed,omitempty"` // running on dev
+	Released string `json:"released,omitempty"` // running in production
+	// RollbackTo is what production ran before this ticket's release, noted
+	// as the ticket heads to production so a rerun of the step after a crash
+	// can't mistake its own release for the last good one.
+	RollbackTo string `json:"rollbackTo,omitempty"`
+	// RetryAfterRevert: the human sent it back at the production gate with
+	// guidance, so after the revert it's built again rather than abandoned.
+	RetryAfterRevert bool    `json:"retryAfterRevert,omitempty"`
+	CostUSD          float64 `json:"costUSD"`
 
 	// Spec is the markdown committed as specs/<id>.md with the change.
 	// SpecFiles is what it plans to change, checked against the real diff.

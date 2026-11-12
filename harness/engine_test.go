@@ -71,6 +71,10 @@ type fakeRepo struct {
 	changed  []target.FileChange
 	broken   error  // returned by Checkout, to simulate infrastructure failure
 	dir      string // what Checkout returns; the spec is written here
+	deployed map[string]string
+	deploys  []string // environments deployed to, in order
+	// prodBroken makes every production smoke test fail.
+	prodBroken bool
 }
 
 func (f *fakeRepo) sha() string { f.n++; return fmt.Sprintf("sha%07d", f.n) }
@@ -89,7 +93,24 @@ func (f *fakeRepo) CommitAndPush(context.Context, string, string, string) (strin
 }
 func (f *fakeRepo) HeadSHA(context.Context, string) (string, error)       { return f.sha(), nil }
 func (f *fakeRepo) Merge(context.Context, string, string) (string, error) { return f.sha(), nil }
-func (f *fakeRepo) Deploy(context.Context) (string, error)                { return f.sha(), nil }
+
+// Deploy returns the commit it was given, like the real one, or a new one
+// for a branch name.
+func (f *fakeRepo) Deploy(_ context.Context, env, ref string) (string, error) {
+	sha := ref
+	if !strings.HasPrefix(ref, "sha") {
+		sha = f.sha()
+	}
+	if f.deployed == nil {
+		f.deployed = map[string]string{}
+	}
+	f.deployed[env] = sha
+	f.deploys = append(f.deploys, env)
+	return sha, nil
+}
+func (f *fakeRepo) Deployed(_ context.Context, env string) (string, error) {
+	return f.deployed[env], nil
+}
 func (f *fakeRepo) Revert(_ context.Context, sha string) (string, error) {
 	f.reverted = append(f.reverted, sha)
 	return f.sha(), nil
@@ -106,9 +127,9 @@ func (f *fakeRepo) RunCI(_ context.Context, sha string) (target.CIResult, error)
 	return target.CIResult{SHA: sha, Passed: true}, nil
 }
 
-func (f *fakeRepo) Smoke(context.Context) (target.SmokeResult, error) {
+func (f *fakeRepo) Smoke(_ context.Context, env string) (target.SmokeResult, error) {
 	f.smokes++
-	if f.smoke != nil && !f.smoke(f.smokes) {
+	if f.smoke != nil && !f.smoke(f.smokes) || env == target.Production && f.prodBroken {
 		return target.SmokeResult{Log: "poster exited: exit status 2"}, nil
 	}
 	return target.SmokeResult{Passed: true}, nil
@@ -137,6 +158,9 @@ func newHarness(t *testing.T) *harness {
 	if err := os.CopyFS(steps, os.DirFS("../steps")); err != nil {
 		t.Fatal(err)
 	}
+	// Most tests are about the steps before production, so changes ship
+	// without stopping at the production gate; the promote tests turn it on.
+	cfg.Production.Approval = ProductionAuto
 	h := &harness{t: t, repo: &fakeRepo{dir: t.TempDir()}, clock: time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)}
 	h.e = &Engine{Store: store, Repo: h.repo, Runner: fakeAgent{}, StepsDir: steps, Config: cfg,
 		Now: func() time.Time { return h.clock }}
@@ -696,5 +720,59 @@ func TestOpenMigratesTheReadinessRename(t *testing.T) {
 			t.Fatalf("got %+v, events %+v, %v", tk, evs, err)
 		}
 		_ = s.Close()
+	}
+}
+
+// With production approval manual, a change waits on dev for a human, and
+// ships the commit that was tested there.
+func TestProductionGate(t *testing.T) {
+	h := newHarness(t)
+	h.e.Config.Production.Approval = ProductionManual
+	id := h.create("Add a dark theme")
+	tk := h.drain(id)
+	expectWaiting(t, tk, WaitPromote)
+	if tk.Deployed == "" || tk.Released != "" || !slices.Equal(h.repo.deploys, []string{target.Dev}) {
+		t.Fatalf("got %+v, deploys %v", tk, h.repo.deploys)
+	}
+	h.act(id, ActionPromote, "")
+	tk = h.drain(id)
+	expectDeployed(t, tk)
+	if tk.Released == "" || h.repo.deployed[target.Production] != tk.Released {
+		t.Fatalf("got %+v", tk)
+	}
+}
+
+func TestSendBackFromTheProductionGateRevertsAndRebuilds(t *testing.T) {
+	h := newHarness(t)
+	h.e.Config.Production.Approval = ProductionManual
+	id := h.create("Add a dark theme")
+	expectWaiting(t, h.drain(id), WaitPromote)
+	if _, err := h.e.Act(context.Background(), id, ActionRetry, ""); !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("send back without guidance: got %v", err)
+	}
+	h.act(id, ActionRetry, "the date is too small on dev")
+	tk := h.drain(id)
+	expectWaiting(t, tk, WaitPromote) // built again, deployed to dev again
+	if len(h.repo.reverted) != 1 || tk.Attempt != 2 || tk.Builds != 2 || !strings.Contains(tk.Feedback, "the date is too small") {
+		t.Fatalf("got %+v, reverted %v", tk, h.repo.reverted)
+	}
+	h.act(id, ActionAbandon, "")
+	tk = h.drain(id)
+	if tk.Status != Abandoned || tk.Outcome != "reverted" || len(h.repo.reverted) != 2 {
+		t.Fatalf("got %+v, reverted %v", tk, h.repo.reverted)
+	}
+}
+
+// A production failure puts production back on what it ran before, and
+// takes the change out of main and dev, before asking anyone.
+func TestProductionFailureRollsBack(t *testing.T) {
+	h := newHarness(t)
+	expectDeployed(t, h.drain(h.create("Add a dark theme")))
+	good := h.repo.deployed[target.Production]
+	h.repo.prodBroken = true
+	tk := h.drain(h.create("Add a green theme"))
+	expectWaiting(t, tk, WaitEscalated)
+	if h.repo.deployed[target.Production] != good || len(h.repo.reverted) != 1 || tk.Attempt != 2 || !strings.Contains(tk.WaitText, "back on "+short(good)) {
+		t.Fatalf("got %+v, production %s want %s", tk, h.repo.deployed[target.Production], good)
 	}
 }
