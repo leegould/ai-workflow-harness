@@ -28,20 +28,21 @@ func (h *harness) report(source string, body []byte) (Ticket, string) {
 	return t, outcome
 }
 
-// An error report becomes a ticket that goes through the whole flow, and its
-// fix waits for a human even though the change itself is low risk.
-func TestSentryReportBecomesATicketAHumanApproves(t *testing.T) {
+// An error report becomes a ticket that goes through the whole flow like any
+// other: risk-assessed merge, then dev, then the production gate.
+func TestSentryReportBecomesATicket(t *testing.T) {
 	h := newHarness(t)
+	h.e.Config.Production.Approval = ProductionManual
 	tk, outcome := h.report("sentry", sentryPayload("4501", "created"))
 	if outcome != ReportCreated || !tk.Reactive || tk.ExternalID != "sentry:4501" || !strings.Contains(tk.Description, "Where: main.Render") {
 		t.Fatalf("got %s %+v", outcome, tk)
 	}
 	tk = h.drain(tk.ID)
-	expectWaiting(t, tk, WaitApproval)
-	if tk.Risk != "medium" || !strings.Contains(tk.WaitText, "raised by sentry") || strings.Contains(tk.WaitText, "low:") {
+	expectWaiting(t, tk, WaitPromote)
+	if tk.Risk != "low" {
 		t.Fatalf("got %+v", tk)
 	}
-	h.act(tk.ID, ActionApprove, "")
+	h.act(tk.ID, ActionPromote, "")
 	expectDeployed(t, h.drain(tk.ID))
 }
 
@@ -78,8 +79,6 @@ func TestSimultaneousReportsOpenOneTicket(t *testing.T) {
 func TestAProblemThatComesBackPointsAtTheFixThatDidntHold(t *testing.T) {
 	h := newHarness(t)
 	first, _ := h.report("sentry", sentryPayload("4501", "created"))
-	h.drain(first.ID)
-	h.act(first.ID, ActionApprove, "")
 	expectDeployed(t, h.drain(first.ID))
 	back, outcome := h.report("sentry", sentryPayload("4501", "unresolved"))
 	if outcome != ReportCreated || back.ID == first.ID || back.RegressionOf != first.ID || !strings.Contains(back.Description, "came back after "+first.ID) {
@@ -149,7 +148,7 @@ func TestSignedSources(t *testing.T) {
 }
 
 func TestSourcesAPI(t *testing.T) {
-	srv := Server(newHarness(t).e, "")
+	srv := Server(newHarness(t).e, nil)
 	for _, tc := range []struct {
 		path, body string
 		want       int

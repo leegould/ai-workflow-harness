@@ -59,6 +59,10 @@ func (e *Engine) Workflow() (Workflow, error) {
 		SpecAlways: "you approve every spec before the build",
 		SpecNever:  "nobody approves it first",
 	}[e.Config.Spec.Approval]
+	promote := map[string]string{
+		ProductionManual: "Manual: you check it on dev and ship it",
+		ProductionAuto:   "Auto: a change that passes on dev ships",
+	}[e.Config.Production.Approval]
 	steps := []WorkflowStep{
 		{ID: StepRefinement, Label: "Refinement", Kind: "agent",
 			Summary: "Reads the ticket and the code on main. Asks you only what the code can't answer.",
@@ -77,12 +81,18 @@ func (e *Engine) Workflow() (Workflow, error) {
 			Loops:   []string{"Changes asked for: back to Build"}},
 		{ID: StepRisk, Label: "Risk gate", Kind: "gate",
 			Summary: "Paths and diff size from pipeline.yaml, plus any file the spec didn't plan.",
-			Loops:   []string{"Low: merges by itself", "Medium or high: you approve the merge", "Raised by a reactive source: you always approve the merge"}},
+			Loops:   []string{"Low: merges by itself", "Medium or high: you approve the merge"}},
 		{ID: StepMerge, Label: "Merge", Kind: "ship", Summary: "Merges the branch to main."},
-		{ID: StepDeploy, Label: "Deploy", Kind: "ship", Summary: "Builds and deploys main."},
+		{ID: StepDeploy, Label: "Deploy to dev", Kind: "ship", Summary: "Every merge is built and deployed to dev."},
 		{ID: StepSmoke, Label: "Smoke test", Kind: "check",
-			Summary: "Runs the deployed version.",
-			Loops:   []string{"Fail: reverts main, redeploys, and escalates to you"}},
+			Summary: "Runs the version on dev.",
+			Loops:   []string{"Fail: reverts main, redeploys dev, and escalates to you"}},
+		{ID: StepPromote, Label: "Promote", Kind: "gate",
+			Summary: "The production gate.",
+			Loops:   []string{promote, "Send back: reverts it from main and dev, then rebuilds with your guidance"}},
+		{ID: StepRelease, Label: "Production", Kind: "ship",
+			Summary: "Deploys the commit that passed on dev to production, and smoke tests it there.",
+			Loops:   []string{"Fail: production goes back to what it ran before, main and dev are reverted, and it escalates to you"}},
 	}
 	retro := WorkflowStep{ID: "retro", Label: "Retro", Kind: "agent",
 		Summary: "After each ticket: reads its timeline and your verdict, and may propose prompt edits.",

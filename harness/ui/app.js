@@ -1,11 +1,12 @@
 // Harness UI: polls the API and renders the ticket list and the selected
 // ticket. No framework: the page is small enough not to need one.
-const STEPS = ["refinement", "spec", "build", "ci", "review", "risk", "merge", "deploy", "smoke"];
+const STEPS = ["refinement", "spec", "build", "ci", "review", "risk", "merge", "deploy", "smoke", "promote", "release"];
 const STEP_LABEL = { refinement: "Refinement", spec: "Spec", build: "Build", ci: "CI", review: "Review", risk: "Risk gate",
-  merge: "Merge", deploy: "Deploy", smoke: "Smoke test", resume: "Resume" };
+  merge: "Merge", deploy: "Deploy to dev", smoke: "Smoke test", promote: "Promote", release: "Production",
+  resume: "Resume", revert: "Revert" };
 const ACTION_LABEL = { answer: "Send answer", approve: "Approve and merge", revise: "Ask for changes", retry: "Retry with guidance",
   takeover: "Take over", resume: "Resume", abandon: "Abandon" };
-const WAIT_TITLE = { questions: "Refinement has questions", spec: "Check the spec before it's built", escalated: "Escalated: it needs your decision",
+const WAIT_TITLE = { promote: "On dev: ship it to production?", questions: "Refinement has questions", spec: "Check the spec before it's built", escalated: "Escalated: it needs your decision",
   approval: "Needs your approval to merge", takeover: "You've taken this over", error: "A step keeps failing" };
 
 const $ = (id) => document.getElementById(id);
@@ -113,7 +114,8 @@ async function refreshTicket() {
   if (t.builds) meta.push(el("span", {}, `${t.builds} build${t.builds > 1 ? "s" : ""}`));
   if (t.risk) meta.push(el("span", {}, `risk ${t.risk}`));
   meta.push(el("span", {}, `$${t.costUSD.toFixed(2)} agent spend`));
-  if (t.status === "done") meta.push(el("a", { href: "/poster", target: "_blank" }, "Open the deployed poster ↗"));
+  if (t.deployed) meta.push(el("a", { href: "/poster/dev", target: "_blank" }, "Dev ↗"));
+  if (t.released) meta.push(el("a", { href: "/poster/production", target: "_blank" }, "Production ↗"));
   $("t-meta").replaceChildren(...meta);
 
   const cur = STEPS.indexOf(t.step === "resume" ? "ci" : t.step);
@@ -187,7 +189,7 @@ function renderNeeds(t, actions) {
   if (key === shownWait) return;
   shownWait = key;
   if (!key) return $("t-needs").replaceChildren();
-  const placeholder = { questions: "Your answers", spec: "What should change in the spec? (needed to ask for changes)" }[t.wait];
+  const placeholder = { promote: "What's wrong on dev? (needed to send it back)", questions: "Your answers", spec: "What should change in the spec? (needed to ask for changes)" }[t.wait];
   const comment = el("textarea", { rows: 3, placeholder: placeholder || "Optional guidance for the builder" });
   const err = el("span", { class: "error" });
   const needsComment = actions.some((a) => a === "answer" || a === "retry" || a === "revise");
@@ -207,6 +209,7 @@ function renderNeeds(t, actions) {
 function label(t, a) {
   if (a === "retry" && t.wait === "error") return "Retry step";
   if (a === "approve" && t.wait === "spec") return "Approve and build";
+  if (t.wait === "promote") return { promote: "Ship to production", retry: "Send back with guidance", abandon: "Revert and abandon" }[a];
   return ACTION_LABEL[a];
 }
 
@@ -258,7 +261,6 @@ async function refreshWorkflow() {
       el("span", { class: `kind ${src.kind === "reactive" ? "gate" : "agent"}` }, src.kind)),
     el("p", { class: "muted" }, src.name === "ui" ? "The New ticket button." :
       `POST ${src.path}. At most ${src.maxOpen} open; repeats of an open problem are added to its ticket. ` +
-      (src.kind === "reactive" ? "You approve every fix before it merges. " : "") +
       (src.signed ? "Signed reports only." : "Not signed: set its secret before exposing it.")))));
   $("flow").replaceChildren(...wf.steps.map((s, i) => card(s, i + 1)));
   $("flow-retro").replaceChildren(el("ol", { class: "flow" }, card(wf.retro)));

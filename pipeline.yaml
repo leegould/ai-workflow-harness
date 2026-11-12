@@ -9,8 +9,8 @@ max_rounds: 3
 # sender's payload (sentry, or webhook for anything that can send
 # {"id", "title", "description", "url"}).
 #   kind: planned (a person asked for it) or reactive (a system noticed
-#     something). A reactive ticket's fix always waits for a human to approve
-#     the merge, whatever the risk floor says.
+#     something). Both go through the same gates; reactive is shown on the
+#     ticket, and is where tighter rules would go.
 #   max_open: at most this many open tickets from the source; more reports are
 #     dropped (and the sender gets a 429). A report of a problem that already
 #     has an open ticket is added to that ticket instead of opening another.
@@ -50,6 +50,12 @@ models:
 #   never:  it's still written and committed, but nobody approves it first
 spec:
   approval: risky
+
+# Every merge deploys to dev and is smoke tested there. Who ships it on to
+# production: manual (a human checks dev and ships each change) or auto (a
+# change that passes on dev ships).
+production:
+  approval: manual
 
 # The deterministic risk floor. The highest matching level wins. Low merges
 # automatically; medium and high wait for a human to approve. An LLM risk note

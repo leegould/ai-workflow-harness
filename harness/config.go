@@ -45,6 +45,8 @@ type Config struct {
 	MaxRounds int        `yaml:"max_rounds"`
 	Risk      RiskConfig `yaml:"risk"`
 	Spec      SpecConfig `yaml:"spec"`
+	// Production says who ships a change from dev to production.
+	Production ProductionConfig `yaml:"production"`
 	// Models are what an agent step may be switched to from the UI, per
 	// runner (claude-cli, cursor-cli). Model names mean nothing across runners.
 	Models map[string][]string `yaml:"models"`
@@ -58,6 +60,17 @@ type Config struct {
 type SpecConfig struct {
 	Approval string `yaml:"approval"`
 }
+
+// ProductionConfig: manual (a human ships each change, the default) or auto
+// (anything that passes its smoke test on dev ships).
+type ProductionConfig struct {
+	Approval string `yaml:"approval"`
+}
+
+const (
+	ProductionManual = "manual"
+	ProductionAuto   = "auto"
+)
 
 const (
 	SpecRisky  = "risky"
@@ -97,6 +110,13 @@ func LoadConfig(file string) (Config, error) {
 	}
 	if c.MaxRounds <= 0 {
 		c.MaxRounds = 3
+	}
+	switch c.Production.Approval {
+	case "":
+		c.Production.Approval = ProductionManual
+	case ProductionManual, ProductionAuto:
+	default:
+		return Config{}, fmt.Errorf("%s: production approval must be manual or auto, not %q", file, c.Production.Approval)
 	}
 	switch c.Spec.Approval {
 	case "":

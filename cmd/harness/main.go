@@ -68,8 +68,11 @@ func run(addr, db, targetDir, seed, steps, config string, workers int) error {
 		Config:   cfg,
 	}
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           harness.Server(engine, filepath.Join(local.DeployDir(), "poster.html")),
+		Addr: addr,
+		Handler: harness.Server(engine, map[string]string{
+			target.Dev:        filepath.Join(local.DeployDir(target.Dev), "poster.html"),
+			target.Production: filepath.Join(local.DeployDir(target.Production), "poster.html"),
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

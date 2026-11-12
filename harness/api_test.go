@@ -25,7 +25,7 @@ func call(t *testing.T, h http.Handler, method, path, body string) (int, map[str
 func TestAPI(t *testing.T) {
 	hn := newHarness(t)
 	page := filepath.Join(t.TempDir(), "poster.html")
-	srv := Server(hn.e, page)
+	srv := Server(hn.e, map[string]string{"production": page})
 
 	if code, _ := call(t, srv, "GET", "/", ""); code != http.StatusOK {
 		t.Fatalf("UI: %d", code)
@@ -90,5 +90,11 @@ func TestAPI(t *testing.T) {
 	}
 	if code, _ := call(t, srv, "GET", "/poster", ""); code != http.StatusOK {
 		t.Fatalf("poster: %d", code)
+	}
+	if code, _ := call(t, srv, "GET", "/poster/production", ""); code != http.StatusOK {
+		t.Fatalf("poster by env: %d", code)
+	}
+	if code, _ := call(t, srv, "GET", "/poster/staging", ""); code != http.StatusNotFound {
+		t.Fatalf("unknown env: %d", code)
 	}
 }
