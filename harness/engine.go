@@ -338,6 +338,13 @@ func (e *Engine) risk(ctx context.Context, t *Ticket) error {
 	// The spec itself is the harness's own file, not a change to judge.
 	changes := slices.DeleteFunc(all, func(c target.FileChange) bool { return c.Path == specPath(t.ID) })
 	level, why := e.Config.Risk.Assess(changes)
+	if t.Reactive {
+		if level == Low {
+			why = nil
+		}
+		level = max(level, Medium)
+		why = append(why, "medium: raised by "+t.Source+", so a human approves the fix before it merges")
+	}
 	if extra := unplanned(t.SpecFiles, changes); len(extra) > 0 {
 		if level == Low {
 			why = nil

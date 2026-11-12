@@ -56,6 +56,9 @@
   <section id="workflow" class="panel" hidden>
     <h1>Workflow</h1>
     <p class="muted">How this harness takes a ticket to a deployed change, step by step. Agent steps show the model they run on: changing one edits only that step file's <code>model:</code> line, and tickets in flight use it from their next run of that step. Gates and their settings come from <code>pipeline.yaml</code>.</p>
+    <h2>Where tickets come from</h2>
+    <div class="sources" id="sources"></div>
+    <h2>Steps</h2>
     <ol class="flow" id="flow"></ol>
     <h2>After each ticket</h2>
     <div id="flow-retro"></div>

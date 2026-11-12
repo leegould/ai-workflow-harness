@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -99,6 +100,28 @@ func Server(e *Engine, posterPage string) http.Handler {
 		reply(w, http.StatusOK, t)
 	})
 
+	mux.HandleFunc("POST /api/sources/{source}", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		if err != nil {
+			fail(w, http.StatusBadRequest, err)
+			return
+		}
+		t, outcome, err := e.Report(r.Context(), r.PathValue("source"), r.Header, body)
+		if err != nil {
+			fail(w, status(err), err)
+			return
+		}
+		code := map[string]int{ReportCreated: http.StatusCreated, ReportLimited: http.StatusTooManyRequests}[outcome]
+		if code == 0 {
+			code = http.StatusOK
+		}
+		out := map[string]any{"outcome": outcome}
+		if t.ID != "" {
+			out["ticket"] = t.ID
+		}
+		reply(w, code, out)
+	})
+
 	mux.HandleFunc("GET /api/proposals", func(w http.ResponseWriter, r *http.Request) {
 		ps, err := e.Store.Proposals(r.Context())
 		if err != nil {
@@ -170,8 +193,12 @@ func Server(e *Engine, posterPage string) http.Handler {
 
 func status(err error) int {
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, ErrNotFound), errors.Is(err, ErrUnknownSource):
 		return http.StatusNotFound
+	case errors.Is(err, ErrBadSignature):
+		return http.StatusUnauthorized
+	case errors.Is(err, ErrBadReport):
+		return http.StatusBadRequest
 	case errors.Is(err, ErrBadModel):
 		return http.StatusBadRequest
 	case errors.Is(err, ErrInvalidAction), errors.Is(err, ErrProposalClosed):

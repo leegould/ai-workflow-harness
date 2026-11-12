@@ -48,6 +48,8 @@ type Config struct {
 	// Models are what an agent step may be switched to from the UI, per
 	// runner (claude-cli, cursor-cli). Model names mean nothing across runners.
 	Models map[string][]string `yaml:"models"`
+	// Sources are where tickets come from besides the New ticket button.
+	Sources map[string]SourceConfig `yaml:"sources"`
 }
 
 // SpecConfig says when a human approves the spec before the build: when the
@@ -63,7 +65,10 @@ const (
 	SpecNever  = "never"
 )
 
-var ErrBadApproval = errors.New("spec approval must be risky, always or never")
+var (
+	ErrBadApproval = errors.New("spec approval must be risky, always or never")
+	ErrNoAdapter   = errors.New("no adapter for this source (sentry, webhook)")
+)
 
 // RiskConfig is the deterministic risk floor: which paths and diff sizes force
 // a human to approve before merge. An LLM risk note could raise the level
@@ -99,6 +104,14 @@ func LoadConfig(file string) (Config, error) {
 	case SpecRisky, SpecAlways, SpecNever:
 	default:
 		return Config{}, fmt.Errorf("%s: %w: %q", file, ErrBadApproval, c.Spec.Approval)
+	}
+	for name, src := range c.Sources {
+		if _, ok := adapters[name]; !ok {
+			return Config{}, fmt.Errorf("%s: source %q: %w", file, name, ErrNoAdapter)
+		}
+		if src.Kind != SourcePlanned && src.Kind != SourceReactive {
+			return Config{}, fmt.Errorf("%s: source %q: kind must be planned or reactive", file, name)
+		}
 	}
 	for i := range c.Risk.Rules {
 		r := &c.Risk.Rules[i]

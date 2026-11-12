@@ -70,6 +70,33 @@ reason.
 | Merge, deploy, smoke, revert | Local git and go against the stand-in repo and a deploy folder |
 | Review | Stub: approves unless the ticket says `never-approve` |
 
+## Sources: where tickets come from
+
+Besides the New ticket button, tickets can come from other systems through a webhook at
+`POST /api/sources/<name>`, configured under `sources:` in `pipeline.yaml`. Two adapters
+exist: **sentry** (Sentry's issue and alert webhooks) and **webhook** (anything that can
+send `{"id", "title", "description", "url"}`).
+
+Work comes in two kinds. **Planned** work is a person asking for something. **Reactive**
+work is a system noticing something, like an error in production, and it closes a loop:
+the source that raised the problem is the one that shows whether the fix held. A machine
+can raise a lot of tickets, so the guardrails are in code:
+
+- A repeat report of a problem with an open ticket is added to that ticket ("reported 14
+  times") instead of opening another. That check and the create are one transaction, so
+  reports arriving together can't both open a ticket.
+- Each source has at most `max_open` tickets open. More reports are dropped, and the
+  sender gets a 429.
+- A problem that comes back after its fix was deployed opens a new ticket that names the
+  fix that didn't hold, so the agents look at that change first.
+- The fix for a reactive ticket always waits for a human to approve the merge, whatever
+  the risk floor says. Here that's the local equivalent of "auto-fixes go to dev only".
+- With the source's signing secret set (`secret_env`), unsigned or wrongly signed reports
+  are refused.
+
+`scripts/fake-sentry.sh` sends a Sentry-shaped report about the poster, so you can watch
+an error become a ticket, a spec, a fix and a deploy without a Sentry account.
+
 ## Specs
 
 Once refinement says a ticket is ready, a spec agent writes a short brief: the goal, what's
@@ -184,6 +211,8 @@ sample/poster      the toy app tickets change
 ## Next
 
 - A real review agent, with the target's CLAUDE.md as its rubric.
+- Close the loop with Sentry itself: resolve the issue when its fix deploys, and link the
+  ticket. A Linear source that writes progress back as comments.
 - Record the model and prompt version on each agent run, so stats can compare models and
   a retro judges a ticket against the prompt it actually ran with.
 - Retros across several tickets: only propose a change when a pattern repeats.

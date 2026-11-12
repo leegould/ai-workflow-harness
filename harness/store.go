@@ -113,6 +113,85 @@ func (s *Store) Create(ctx context.Context, t Ticket) (Ticket, error) {
 	return t, nil
 }
 
+// CreateReported creates a ticket from a source's report, or adds the report
+// to the open ticket for the same problem. It's one transaction, so two
+// reports of the same problem arriving together can't both open a ticket.
+func (s *Store) CreateReported(ctx context.Context, t Ticket, maxOpen int) (Ticket, string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Ticket{}, "", fmt.Errorf("begin report: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	const open = `status NOT IN ('done', 'abandoned')`
+	var data string
+	err = tx.QueryRowContext(ctx, `SELECT data FROM tickets WHERE `+open+` AND json_extract(data, '$.externalID') = ? ORDER BY seq DESC LIMIT 1`, t.ExternalID).Scan(&data)
+	switch {
+	case err == nil:
+		existing, err := decode(data)
+		if err != nil {
+			return Ticket{}, "", err
+		}
+		existing.Occurrences++
+		if err := saveTx(ctx, tx, existing); err != nil {
+			return Ticket{}, "", err
+		}
+		return existing, ReportDuplicate, commit(tx)
+	case !errors.Is(err, sql.ErrNoRows):
+		return Ticket{}, "", fmt.Errorf("find open report: %w", err)
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tickets WHERE `+open+` AND json_extract(data, '$.source') = ?`, t.Source).Scan(&n); err != nil {
+		return Ticket{}, "", fmt.Errorf("count open reports: %w", err)
+	}
+	if maxOpen > 0 && n >= maxOpen {
+		return Ticket{}, ReportLimited, nil
+	}
+	// A problem whose last ticket was deployed has come back: say so, and
+	// point the agents at the change that didn't hold.
+	var prev, merged string
+	err = tx.QueryRowContext(ctx, `SELECT id, COALESCE(json_extract(data, '$.merged'), '') FROM tickets WHERE status = 'done' AND json_extract(data, '$.externalID') = ? ORDER BY seq DESC LIMIT 1`, t.ExternalID).Scan(&prev, &merged)
+	switch {
+	case err == nil:
+		t.RegressionOf = prev
+		t.Description = fmt.Sprintf("This came back after %s was deployed (merge %s). Look at what %s changed first: its fix didn't hold.\n\n%s", prev, short(merged), prev, t.Description)
+	case !errors.Is(err, sql.ErrNoRows):
+		return Ticket{}, "", fmt.Errorf("find earlier fix: %w", err)
+	}
+	var seq int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM tickets`).Scan(&seq); err != nil {
+		return Ticket{}, "", fmt.Errorf("next ticket id: %w", err)
+	}
+	t.ID = fmt.Sprintf("T-%d", seq)
+	raw, err := json.Marshal(t)
+	if err != nil {
+		return Ticket{}, "", fmt.Errorf("encode ticket: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO tickets (id, seq, status, not_before, data) VALUES (?, ?, ?, ?, ?)`,
+		t.ID, seq, t.Status, t.NotBefore.UnixMilli(), raw); err != nil {
+		return Ticket{}, "", fmt.Errorf("insert ticket: %w", err)
+	}
+	return t, ReportCreated, commit(tx)
+}
+
+func saveTx(ctx context.Context, tx *sql.Tx, t Ticket) error {
+	raw, err := json.Marshal(t)
+	if err != nil {
+		return fmt.Errorf("encode ticket: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE tickets SET status = ?, not_before = ?, data = ? WHERE id = ?`,
+		t.Status, t.NotBefore.UnixMilli(), raw, t.ID); err != nil {
+		return fmt.Errorf("save %s: %w", t.ID, err)
+	}
+	return nil
+}
+
+func commit(tx *sql.Tx) error {
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) Get(ctx context.Context, id string) (Ticket, error) {
 	var data string
 	err := s.db.QueryRowContext(ctx, `SELECT data FROM tickets WHERE id = ?`, id).Scan(&data)

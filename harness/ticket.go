@@ -109,6 +109,18 @@ type Ticket struct {
 	Verdict        string `json:"verdict,omitempty"`
 	VerdictComment string `json:"verdictComment,omitempty"`
 
+	// Where the ticket came from: "" for the New ticket button, otherwise a
+	// source from pipeline.yaml. ExternalID identifies the problem at the
+	// source, so a repeat report is recognised. Reactive is copied from the
+	// source when the ticket is made, so editing the config later doesn't
+	// change the rules for tickets already in flight.
+	Source       string `json:"source,omitempty"`
+	ExternalID   string `json:"externalID,omitempty"`
+	ExternalURL  string `json:"externalURL,omitempty"`
+	Reactive     bool   `json:"reactive,omitempty"`
+	Occurrences  int    `json:"occurrences,omitempty"`
+	RegressionOf string `json:"regressionOf,omitempty"` // the ticket whose deployed fix didn't hold
+
 	NotBefore time.Time `json:"notBefore"`
 	Created   time.Time `json:"created"`
 	Updated   time.Time `json:"updated"`
