@@ -36,6 +36,8 @@ type Repo interface {
 	// or target.Production).
 	Deploy(ctx context.Context, env, ref string) (sha string, err error)
 	Deployed(ctx context.Context, env string) (sha string, err error)
+	// Contains reports whether commit includes ancestor.
+	Contains(ctx context.Context, commit, ancestor string) (bool, error)
 	Smoke(ctx context.Context, env string) (target.SmokeResult, error)
 }
 
@@ -374,6 +376,7 @@ func (e *Engine) merge(ctx context.Context, t *Ticket) error {
 		return fmt.Errorf("merge: %w", err)
 	}
 	t.Merged = sha
+	t.MergedAt = e.now()
 	e.event(ctx, t, "ship", "Merged "+t.Branch+" to main as "+short(sha), "")
 	e.next(t, StepDeploy)
 	return nil
@@ -472,6 +475,9 @@ func (e *Engine) release(ctx context.Context, t *Ticket) error {
 	if res.Passed {
 		t.Released = sha
 		e.event(ctx, t, "ship", "Released "+short(sha)+" to production", res.Log)
+		if err := e.shippedWith(ctx, t); err != nil {
+			return err
+		}
 		t.Status = Done
 		t.Outcome = "deployed"
 		t.Retro = RetroPending
@@ -553,6 +559,17 @@ func (e *Engine) Act(ctx context.Context, id string, a Action, comment string) (
 		t.Description += "\n\nAnswers:\n" + comment
 		e.next(&t, StepRefinement)
 	case ActionPromote:
+		// Shipping this ships everything merged before it, so all of that
+		// has to have passed on dev too.
+		batch, err := e.batch(ctx, t)
+		if err != nil {
+			return t, err
+		}
+		for _, b := range batch {
+			if b.Wait != WaitPromote {
+				return t, fmt.Errorf("%w: shipping %s would also ship %s, which hasn't passed on dev yet", ErrInvalidAction, t.ID, b.ID)
+			}
+		}
 		if err := e.toProduction(ctx, &t); err != nil {
 			return t, err
 		}

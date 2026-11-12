@@ -111,6 +111,11 @@ func (f *fakeRepo) Deploy(_ context.Context, env, ref string) (string, error) {
 func (f *fakeRepo) Deployed(_ context.Context, env string) (string, error) {
 	return f.deployed[env], nil
 }
+
+// Contains: fake SHAs count up, so a later commit contains an earlier one.
+func (f *fakeRepo) Contains(_ context.Context, commit, ancestor string) (bool, error) {
+	return ancestor <= commit, nil
+}
 func (f *fakeRepo) Revert(_ context.Context, sha string) (string, error) {
 	f.reverted = append(f.reverted, sha)
 	return f.sha(), nil
@@ -774,5 +779,61 @@ func TestProductionFailureRollsBack(t *testing.T) {
 	expectWaiting(t, tk, WaitEscalated)
 	if h.repo.deployed[target.Production] != good || len(h.repo.reverted) != 1 || tk.Attempt != 2 || !strings.Contains(tk.WaitText, "back on "+short(good)) {
 		t.Fatalf("got %+v, production %s want %s", tk, h.repo.deployed[target.Production], good)
+	}
+}
+
+// Shipping a ticket ships everything merged before it, so the release marks
+// those released too.
+func TestShippingALaterTicketReleasesTheEarlierOnes(t *testing.T) {
+	h := newHarness(t)
+	h.e.Config.Production.Approval = ProductionManual
+	ctx := context.Background()
+	first, second := h.create("Add a dark theme"), h.create("Add a green theme")
+	h.drain(first)
+	expectWaiting(t, h.drain(second), WaitPromote)
+	rel, err := h.e.Releases(ctx)
+	if err != nil || len(rel.Items) != 2 || rel.Items[0].Ticket.ID != first || !slices.Equal(rel.Items[1].Ships, []string{first}) || rel.Items[1].State != "ready" {
+		t.Fatalf("got %+v %v", rel, err)
+	}
+	h.act(second, ActionPromote, "")
+	h.drain(second)
+	a, _ := h.e.Store.Get(ctx, first)
+	b, _ := h.e.Store.Get(ctx, second)
+	expectDeployed(t, a)
+	expectDeployed(t, b)
+	if a.Released != b.Released || a.Released == "" {
+		t.Fatalf("released %q and %q", a.Released, b.Released)
+	}
+	if rel, _ := h.e.Releases(ctx); len(rel.Items) != 0 {
+		t.Fatalf("nothing left to release, got %+v", rel.Items)
+	}
+}
+
+// A batch can't ship while something in it hasn't passed on dev.
+func TestCantShipPastATicketStillTestingOnDev(t *testing.T) {
+	h := newHarness(t)
+	h.e.Config.Production.Approval = ProductionManual
+	ctx := context.Background()
+	first := h.create("Add a dark theme")
+	for range 20 { // run the first ticket until it's deployed to dev, not yet smoke tested
+		if tk, _ := h.e.Store.Get(ctx, first); tk.Step == StepSmoke {
+			tk.NotBefore = h.clock.Add(time.Hour) // hold it there
+			if err := h.e.Store.Save(ctx, tk); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+		if _, err := h.e.RunOnce(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := h.create("Add a green theme")
+	expectWaiting(t, h.drain(second), WaitPromote)
+	rel, _ := h.e.Releases(ctx)
+	if len(rel.Items) != 2 || rel.Items[0].State != "testing" || !strings.Contains(rel.Items[1].Blocked, first) {
+		t.Fatalf("got %+v", rel.Items)
+	}
+	if _, err := h.e.Act(ctx, second, ActionPromote, ""); !errors.Is(err, ErrInvalidAction) || !strings.Contains(err.Error(), first) {
+		t.Fatalf("got %v", err)
 	}
 }

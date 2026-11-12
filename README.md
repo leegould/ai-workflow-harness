@@ -74,7 +74,7 @@ reason.
 | CI | The harness runs gofmt, vet and tests on the pushed commit itself, whatever the agent says it ran |
 | Risk gate | **Deterministic floor from `pipeline.yaml`:** paths (agent rules, dependencies, the CLI the smoke test uses) and diff size. Changing a file the spec didn't plan makes it at least medium |
 | Merge, deploy, smoke, revert | Local git and go against the stand-in repo, with a deploy folder each for dev and production |
-| Production gate | `production.approval` in `pipeline.yaml`: manual (the default) or auto. Production gets the exact commit that passed on dev, and a failure there rolls it back to what it ran before |
+| Production gate | `production.approval` in `pipeline.yaml`: manual (the default) or auto. Production gets the exact commit that passed on dev, and a failure there rolls it back to what it ran before. The **Releases** page lists what's on dev and not in production, in merge order. Shipping one ships everything merged before it, so it's refused until all of that has passed on dev, and they're all marked released together |
 | Review | Stub: approves unless the ticket says `never-approve` |
 
 ## Sources: where tickets come from

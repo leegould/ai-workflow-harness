@@ -70,7 +70,7 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("feedback: %d", code)
 	}
 
-	for _, path := range []string{"/api/proposals", "/api/stats"} {
+	for _, path := range []string{"/api/proposals", "/api/stats", "/api/releases"} {
 		if code, _ := call(t, srv, "GET", path, ""); code != http.StatusOK {
 			t.Fatalf("%s: %d", path, code)
 		}

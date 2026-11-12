@@ -205,6 +205,20 @@ func (l Local) Deploy(ctx context.Context, env, ref string) (string, error) {
 	return sha, nil
 }
 
+// Contains reports whether commit includes ancestor, i.e. whether deploying
+// commit also deploys ancestor.
+func (l Local) Contains(ctx context.Context, commit, ancestor string) (bool, error) {
+	_, err := run(ctx, "", "git", "--git-dir", l.Origin(), "merge-base", "--is-ancestor", ancestor, commit)
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("git merge-base: %w", err)
+	}
+	return true, nil
+}
+
 // Deployed returns the commit running in env, or "" if nothing is.
 func (l Local) Deployed(_ context.Context, env string) (string, error) {
 	if err := checkEnv(env); err != nil {

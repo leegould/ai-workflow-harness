@@ -88,17 +88,18 @@ type Ticket struct {
 	WaitText string `json:"waitText,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`
 
-	Round    int    `json:"round"`    // build rounds since the last human retry/resume; capped
-	Builds   int    `json:"builds"`   // build agent runs in total
-	Attempt  int    `json:"attempt"`  // which branch; a revert starts a new one
-	Failures int    `json:"failures"` // consecutive infrastructure failures of this step
-	Branch   string `json:"branch,omitempty"`
-	SHA      string `json:"sha,omitempty"`
-	Feedback string `json:"feedback,omitempty"`
-	Risk     string `json:"risk,omitempty"`
-	Merged   string `json:"merged,omitempty"`
-	Deployed string `json:"deployed,omitempty"` // running on dev
-	Released string `json:"released,omitempty"` // running in production
+	Round    int       `json:"round"`    // build rounds since the last human retry/resume; capped
+	Builds   int       `json:"builds"`   // build agent runs in total
+	Attempt  int       `json:"attempt"`  // which branch; a revert starts a new one
+	Failures int       `json:"failures"` // consecutive infrastructure failures of this step
+	Branch   string    `json:"branch,omitempty"`
+	SHA      string    `json:"sha,omitempty"`
+	Feedback string    `json:"feedback,omitempty"`
+	Risk     string    `json:"risk,omitempty"`
+	Merged   string    `json:"merged,omitempty"`
+	Deployed string    `json:"deployed,omitempty"` // running on dev
+	Released string    `json:"released,omitempty"` // running in production
+	MergedAt time.Time `json:"mergedAt,omitzero"`
 	// RollbackTo is what production ran before this ticket's release, noted
 	// as the ticket heads to production so a rerun of the step after a crash
 	// can't mistake its own release for the last good one.
