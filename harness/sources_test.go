@@ -183,3 +183,22 @@ func TestLoadConfigRejectsBadSources(t *testing.T) {
 		}
 	}
 }
+
+// A repeat report that lands while a worker is mid-step on the ticket must
+// still count: the worker's save mustn't overwrite it. (Found in a live run.)
+func TestRepeatReportDuringAStepStillCounts(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	first, _ := h.report("sentry", sentryPayload("4501", "created"))
+	claimed, ok, err := h.e.Store.Claim(ctx, h.clock)
+	if err != nil || !ok || claimed.ID != first.ID {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	h.report("sentry", sentryPayload("4501", "created"))
+	if err := h.e.process(ctx, claimed); err != nil { // the worker finishes its step and saves
+		t.Fatal(err)
+	}
+	if tk, _ := h.e.Store.Get(ctx, first.ID); tk.Occurrences != 2 {
+		t.Fatalf("occurrences %d, want 2", tk.Occurrences)
+	}
+}

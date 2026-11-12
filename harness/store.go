@@ -54,6 +54,14 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('tickets') WHERE name = 'occurrences'`).Scan(&n); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	if n == 0 {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE tickets ADD COLUMN occurrences INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
 	// The readiness step was renamed refinement. Each statement only matches
 	// rows still using the old name, so running it again changes nothing.
 	for _, q := range []string{
@@ -131,9 +139,10 @@ func (s *Store) CreateReported(ctx context.Context, t Ticket, maxOpen int) (Tick
 		if err != nil {
 			return Ticket{}, "", err
 		}
-		existing.Occurrences++
-		if err := saveTx(ctx, tx, existing); err != nil {
-			return Ticket{}, "", err
+		// Only the count changes, in its own column: a worker may be mid-step
+		// on this ticket, and rewriting its document here would race its save.
+		if err := tx.QueryRowContext(ctx, `UPDATE tickets SET occurrences = occurrences + 1 WHERE id = ? RETURNING occurrences`, existing.ID).Scan(&existing.Occurrences); err != nil {
+			return Ticket{}, "", fmt.Errorf("count report: %w", err)
 		}
 		return existing, ReportDuplicate, commit(tx)
 	case !errors.Is(err, sql.ErrNoRows):
@@ -166,23 +175,11 @@ func (s *Store) CreateReported(ctx context.Context, t Ticket, maxOpen int) (Tick
 	if err != nil {
 		return Ticket{}, "", fmt.Errorf("encode ticket: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO tickets (id, seq, status, not_before, data) VALUES (?, ?, ?, ?, ?)`,
-		t.ID, seq, t.Status, t.NotBefore.UnixMilli(), raw); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO tickets (id, seq, status, not_before, data, occurrences) VALUES (?, ?, ?, ?, ?, ?)`,
+		t.ID, seq, t.Status, t.NotBefore.UnixMilli(), raw, t.Occurrences); err != nil {
 		return Ticket{}, "", fmt.Errorf("insert ticket: %w", err)
 	}
 	return t, ReportCreated, commit(tx)
-}
-
-func saveTx(ctx context.Context, tx *sql.Tx, t Ticket) error {
-	raw, err := json.Marshal(t)
-	if err != nil {
-		return fmt.Errorf("encode ticket: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE tickets SET status = ?, not_before = ?, data = ? WHERE id = ?`,
-		t.Status, t.NotBefore.UnixMilli(), raw, t.ID); err != nil {
-		return fmt.Errorf("save %s: %w", t.ID, err)
-	}
-	return nil
 }
 
 func commit(tx *sql.Tx) error {
@@ -194,19 +191,22 @@ func commit(tx *sql.Tx) error {
 
 func (s *Store) Get(ctx context.Context, id string) (Ticket, error) {
 	var data string
-	err := s.db.QueryRowContext(ctx, `SELECT data FROM tickets WHERE id = ?`, id).Scan(&data)
+	var occurrences int
+	err := s.db.QueryRowContext(ctx, `SELECT data, occurrences FROM tickets WHERE id = ?`, id).Scan(&data, &occurrences)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Ticket{}, fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 	if err != nil {
 		return Ticket{}, fmt.Errorf("get %s: %w", id, err)
 	}
-	return decode(data)
+	t, err := decode(data)
+	t.Occurrences = occurrences
+	return t, err
 }
 
 // List returns all tickets, newest first.
 func (s *Store) List(ctx context.Context) ([]Ticket, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT data FROM tickets ORDER BY seq DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT data, occurrences FROM tickets ORDER BY seq DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list tickets: %w", err)
 	}
@@ -214,13 +214,15 @@ func (s *Store) List(ctx context.Context) ([]Ticket, error) {
 	var ts []Ticket
 	for rows.Next() {
 		var data string
-		if err := rows.Scan(&data); err != nil {
+		var occurrences int
+		if err := rows.Scan(&data, &occurrences); err != nil {
 			return nil, fmt.Errorf("list tickets: %w", err)
 		}
 		t, err := decode(data)
 		if err != nil {
 			return nil, err
 		}
+		t.Occurrences = occurrences
 		ts = append(ts, t)
 	}
 	if err := rows.Err(); err != nil {

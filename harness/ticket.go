@@ -118,7 +118,7 @@ type Ticket struct {
 	ExternalID   string `json:"externalID,omitempty"`
 	ExternalURL  string `json:"externalURL,omitempty"`
 	Reactive     bool   `json:"reactive,omitempty"`
-	Occurrences  int    `json:"occurrences,omitempty"`
+	Occurrences  int    `json:"occurrences,omitempty"`  // read from its own column; see Store.CreateReported
 	RegressionOf string `json:"regressionOf,omitempty"` // the ticket whose deployed fix didn't hold
 
 	NotBefore time.Time `json:"notBefore"`
