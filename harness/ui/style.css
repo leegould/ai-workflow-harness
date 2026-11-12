@@ -130,6 +130,10 @@ textarea { resize: vertical; }
 .kind.check { color: var(--green); }
 .kind.gate { color: var(--amber); }
 .kind.ship { color: var(--accent); }
+.sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.source { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: var(--panel); }
+.source.reactive { border-color: color-mix(in srgb, var(--amber) 50%, var(--line)); }
+.source p { margin: 4px 0 0; font-size: 13px; }
 .loops { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
 .agent-cfg { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; }
 label.model { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; }

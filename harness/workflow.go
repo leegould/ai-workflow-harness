@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 
 	"aiharness/agent"
@@ -33,10 +34,20 @@ type AgentInfo struct {
 	Runners   []string `json:"runners"`
 }
 
+// SourceInfo is one place tickets come from.
+type SourceInfo struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Path    string `json:"path,omitempty"`
+	MaxOpen int    `json:"maxOpen,omitempty"`
+	Signed  bool   `json:"signed"` // its signing secret is set, so unsigned reports are refused
+}
+
 type Workflow struct {
-	Steps  []WorkflowStep      `json:"steps"`
-	Retro  WorkflowStep        `json:"retro"`
-	Models map[string][]string `json:"models"`
+	Sources []SourceInfo        `json:"sources"`
+	Steps   []WorkflowStep      `json:"steps"`
+	Retro   WorkflowStep        `json:"retro"`
+	Models  map[string][]string `json:"models"`
 }
 
 // Workflow describes the flow as it runs now: the steps in order, the gates
@@ -49,7 +60,7 @@ func (e *Engine) Workflow() (Workflow, error) {
 		SpecNever:  "nobody approves it first",
 	}[e.Config.Spec.Approval]
 	steps := []WorkflowStep{
-		{ID: StepReadiness, Label: "Readiness", Kind: "agent",
+		{ID: StepRefinement, Label: "Refinement", Kind: "agent",
 			Summary: "Reads the ticket and the code on main. Asks you only what the code can't answer.",
 			Loops:   []string{"Not ready: waits for your answers, then checks again"}},
 		{ID: StepSpec, Label: "Spec", Kind: "agent",
@@ -66,7 +77,7 @@ func (e *Engine) Workflow() (Workflow, error) {
 			Loops:   []string{"Changes asked for: back to Build"}},
 		{ID: StepRisk, Label: "Risk gate", Kind: "gate",
 			Summary: "Paths and diff size from pipeline.yaml, plus any file the spec didn't plan.",
-			Loops:   []string{"Low: merges by itself", "Medium or high: you approve the merge"}},
+			Loops:   []string{"Low: merges by itself", "Medium or high: you approve the merge", "Raised by a reactive source: you always approve the merge"}},
 		{ID: StepMerge, Label: "Merge", Kind: "ship", Summary: "Merges the branch to main."},
 		{ID: StepDeploy, Label: "Deploy", Kind: "ship", Summary: "Builds and deploys main."},
 		{ID: StepSmoke, Label: "Smoke test", Kind: "check",
@@ -90,7 +101,13 @@ func (e *Engine) Workflow() (Workflow, error) {
 		return Workflow{}, err
 	}
 	retro.Agent = &info
-	return Workflow{Steps: steps, Retro: retro, Models: e.Config.Models}, nil
+	sources := []SourceInfo{{Name: "ui", Kind: SourcePlanned}}
+	for _, name := range slices.Sorted(maps.Keys(e.Config.Sources)) {
+		c := e.Config.Sources[name]
+		sources = append(sources, SourceInfo{Name: name, Kind: c.Kind, Path: "/api/sources/" + name,
+			MaxOpen: c.MaxOpen, Signed: c.SecretEnv != "" && os.Getenv(c.SecretEnv) != ""})
+	}
+	return Workflow{Sources: sources, Steps: steps, Retro: retro, Models: e.Config.Models}, nil
 }
 
 func (e *Engine) agentInfo(name string) (AgentInfo, error) {
@@ -118,7 +135,7 @@ func (e *Engine) checkRunner(step agent.StepDef) error {
 }
 
 // agentSteps are the steps whose model can be chosen.
-var agentSteps = []string{"readiness", "spec", "build", "retro"}
+var agentSteps = []string{"refinement", "spec", "build", "retro"}
 
 // SetModel changes the runner and model an agent step runs on, from the ones
 // pipeline.yaml allows, and only to a runner that can run that step. It edits

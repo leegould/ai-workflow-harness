@@ -4,6 +4,28 @@
 # Build rounds (each round is build, then CI, then review) before it escalates.
 max_rounds: 3
 
+# Where tickets come from besides the New ticket button. Each is a webhook at
+# POST /api/sources/<name>, and the name picks the adapter that reads the
+# sender's payload (sentry, or webhook for anything that can send
+# {"id", "title", "description", "url"}).
+#   kind: planned (a person asked for it) or reactive (a system noticed
+#     something). A reactive ticket's fix always waits for a human to approve
+#     the merge, whatever the risk floor says.
+#   max_open: at most this many open tickets from the source; more reports are
+#     dropped (and the sender gets a 429). A report of a problem that already
+#     has an open ticket is added to that ticket instead of opening another.
+#   secret_env: the environment variable holding the webhook's signing secret.
+#     When it's set, unsigned or wrongly signed reports are refused.
+sources:
+  sentry:
+    kind: reactive
+    max_open: 3
+    secret_env: SENTRY_WEBHOOK_SECRET
+  webhook:
+    kind: planned
+    max_open: 10
+    secret_env: HARNESS_WEBHOOK_SECRET
+
 # The models an agent step can be switched to from the Workflow page, per
 # runner. Choosing one rewrites that step file's runner: and model: lines and
 # nothing else. Steps read their file on every run, so tickets in flight pick
@@ -21,7 +43,7 @@ models:
     - gpt-5.6-sol-high
     - cursor-grok-4.5-high
 
-# After readiness, an agent writes a short spec, committed with the change as
+# After refinement, an agent writes a short spec, committed with the change as
 # specs/<ticket>.md. When does a human approve it before anything is built?
 #   risky:  when the files it plans to change hit a medium or high rule below
 #   always: every ticket

@@ -53,7 +53,7 @@ func TestCursorCLI(t *testing.T) {
 
 // Cursor runs in ask mode, so only read-only steps are allowed on it.
 func TestCursorCLIRunsReadOnlyStepsOnly(t *testing.T) {
-	for name, ok := range map[string]bool{"readiness": true, "spec": true, "retro": true, "build": false} {
+	for name, ok := range map[string]bool{"refinement": true, "spec": true, "retro": true, "build": false} {
 		step, err := LoadStep("../steps", name)
 		if err != nil {
 			t.Fatal(err)

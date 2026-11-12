@@ -19,7 +19,7 @@
 <main id="main">
   <section id="create" class="panel" hidden>
     <h1>New ticket</h1>
-    <p class="muted">Describe the outcome. The readiness check reads the code first and only asks what it can't work out.</p>
+    <p class="muted">Describe the outcome. Refinement reads the code first and only asks what it can't work out.</p>
     <form id="create-form">
       <label>Title <input name="title" required autocomplete="off" placeholder="Dark mode poster"></label>
       <label>Description <textarea name="description" rows="6" placeholder="What should be different when it's done, and how will we know?"></textarea></label>
@@ -48,7 +48,7 @@
 
   <section id="improvements" class="panel" hidden>
     <h1>Improvements</h1>
-    <p class="muted">After each ticket, a retro reads its timeline and may propose edits to the readiness or build prompts. Nothing changes until you apply it. Tools, permissions, budgets and pipeline.yaml are never editable this way.</p>
+    <p class="muted">After each ticket, a retro reads its timeline and may propose edits to the refinement or build prompts. Nothing changes until you apply it. Tools, permissions, budgets and pipeline.yaml are never editable this way.</p>
     <div class="stats" id="stats"></div>
     <div id="proposals"></div>
   </section>
@@ -56,6 +56,9 @@
   <section id="workflow" class="panel" hidden>
     <h1>Workflow</h1>
     <p class="muted">How this harness takes a ticket to a deployed change, step by step. Agent steps show the model they run on: changing one edits only that step file's <code>model:</code> line, and tickets in flight use it from their next run of that step. Gates and their settings come from <code>pipeline.yaml</code>.</p>
+    <h2>Where tickets come from</h2>
+    <div class="sources" id="sources"></div>
+    <h2>Steps</h2>
     <ol class="flow" id="flow"></ol>
     <h2>After each ticket</h2>
     <div id="flow-retro"></div>

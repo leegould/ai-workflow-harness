@@ -25,7 +25,7 @@ func fakeClaude(t *testing.T, output string) (bin, argsFile string) {
 
 func TestClaudeCLI(t *testing.T) {
 	step := StepDef{
-		Name: "readiness", Model: "claude-sonnet-5-5", MaxBudgetUSD: 0.25,
+		Name: "refinement", Model: "claude-sonnet-5-5", MaxBudgetUSD: 0.25,
 		Schema: map[string]any{"type": "object"},
 	}
 	tests := []struct {

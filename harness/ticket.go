@@ -19,15 +19,15 @@ const (
 type Step string
 
 const (
-	StepReadiness Step = "readiness"
-	StepSpec      Step = "spec"
-	StepBuild     Step = "build"
-	StepCI        Step = "ci"
-	StepReview    Step = "review"
-	StepRisk      Step = "risk"
-	StepMerge     Step = "merge"
-	StepDeploy    Step = "deploy"
-	StepSmoke     Step = "smoke"
+	StepRefinement Step = "refinement"
+	StepSpec       Step = "spec"
+	StepBuild      Step = "build"
+	StepCI         Step = "ci"
+	StepReview     Step = "review"
+	StepRisk       Step = "risk"
+	StepMerge      Step = "merge"
+	StepDeploy     Step = "deploy"
+	StepSmoke      Step = "smoke"
 	// StepResume picks up a branch a human worked on, then goes to CI.
 	StepResume Step = "resume"
 )
@@ -36,7 +36,7 @@ const (
 type Wait string
 
 const (
-	WaitQuestions Wait = "questions" // readiness needs more detail
+	WaitQuestions Wait = "questions" // refinement needs more detail
 	WaitSpec      Wait = "spec"      // a human approves the spec before the build
 	WaitEscalated Wait = "escalated" // the loop is stuck, or a deploy was reverted
 	WaitApproval  Wait = "approval"  // the risk gate
@@ -97,7 +97,7 @@ type Ticket struct {
 	Spec      string   `json:"spec,omitempty"`
 	SpecFiles []string `json:"specFiles,omitempty"`
 
-	Questions int    `json:"questions"`       // questions readiness asked, in total
+	Questions int    `json:"questions"`       // questions refinement asked, in total
 	Retro     string `json:"retro,omitempty"` // pending once finished; see RetroOnce
 
 	// Assumptions are calls the agents made for the author, shown on the
@@ -108,6 +108,18 @@ type Ticket struct {
 	// "yes", "no", or empty if they didn't say. The retro's best evidence.
 	Verdict        string `json:"verdict,omitempty"`
 	VerdictComment string `json:"verdictComment,omitempty"`
+
+	// Where the ticket came from: "" for the New ticket button, otherwise a
+	// source from pipeline.yaml. ExternalID identifies the problem at the
+	// source, so a repeat report is recognised. Reactive is copied from the
+	// source when the ticket is made, so editing the config later doesn't
+	// change the rules for tickets already in flight.
+	Source       string `json:"source,omitempty"`
+	ExternalID   string `json:"externalID,omitempty"`
+	ExternalURL  string `json:"externalURL,omitempty"`
+	Reactive     bool   `json:"reactive,omitempty"`
+	Occurrences  int    `json:"occurrences,omitempty"`  // read from its own column; see Store.CreateReported
+	RegressionOf string `json:"regressionOf,omitempty"` // the ticket whose deployed fix didn't hold
 
 	NotBefore time.Time `json:"notBefore"`
 	Created   time.Time `json:"created"`

@@ -131,12 +131,12 @@ func (e *Engine) process(ctx context.Context, t Ticket) error {
 	return e.Store.Save(ctx, t)
 }
 
-// Create adds a ticket and queues its readiness check.
+// Create adds a ticket and queues its refinement step.
 func (e *Engine) Create(ctx context.Context, title, description string) (Ticket, error) {
 	now := e.now()
 	t, err := e.Store.Create(ctx, Ticket{
 		Title: title, Description: description,
-		Status: Queued, Step: StepReadiness, Attempt: 1,
+		Status: Queued, Step: StepRefinement, Attempt: 1,
 		Created: now, Updated: now,
 	})
 	if err != nil {
@@ -149,8 +149,8 @@ func (e *Engine) Create(ctx context.Context, title, description string) (Ticket,
 
 func (e *Engine) step(ctx context.Context, t *Ticket) error {
 	switch t.Step {
-	case StepReadiness:
-		return e.readiness(ctx, t)
+	case StepRefinement:
+		return e.refinement(ctx, t)
 	case StepSpec:
 		return e.spec(ctx, t)
 	case StepBuild:
@@ -215,27 +215,27 @@ func (e *Engine) costEvent(ctx context.Context, t *Ticket, kind, message, detail
 
 // --- steps ---
 
-type readiness struct {
+type refinement struct {
 	Ready       bool     `json:"ready"`
 	Reason      string   `json:"reason"`
 	Questions   []string `json:"questions"`
 	Assumptions []string `json:"assumptions"`
 }
 
-// readiness judges the ticket against the code on main, read-only.
-func (e *Engine) readiness(ctx context.Context, t *Ticket) error {
-	dir, err := e.Repo.Checkout(ctx, t.ID+"-readiness", "main")
+// refinement judges the ticket against the code on main, read-only.
+func (e *Engine) refinement(ctx context.Context, t *Ticket) error {
+	dir, err := e.Repo.Checkout(ctx, t.ID+"-refinement", "main")
 	if err != nil {
 		return fmt.Errorf("check out: %w", err)
 	}
-	var rd readiness
-	run, err := e.runAgent(ctx, "readiness", t, dir, &rd)
+	var rd refinement
+	run, err := e.runAgent(ctx, "refinement", t, dir, &rd)
 	if err != nil {
 		return err
 	}
 	t.CostUSD += run.Cost
 	t.Questions += len(rd.Questions)
-	t.setAssumptions(StepReadiness, rd.Assumptions)
+	t.setAssumptions(StepRefinement, rd.Assumptions)
 	if rd.Ready {
 		e.costEvent(ctx, t, "agent", "Ready to build", rd.Reason, run)
 		e.next(t, StepSpec)
@@ -338,6 +338,13 @@ func (e *Engine) risk(ctx context.Context, t *Ticket) error {
 	// The spec itself is the harness's own file, not a change to judge.
 	changes := slices.DeleteFunc(all, func(c target.FileChange) bool { return c.Path == specPath(t.ID) })
 	level, why := e.Config.Risk.Assess(changes)
+	if t.Reactive {
+		if level == Low {
+			why = nil
+		}
+		level = max(level, Medium)
+		why = append(why, "medium: raised by "+t.Source+", so a human approves the fix before it merges")
+	}
 	if extra := unplanned(t.SpecFiles, changes); len(extra) > 0 {
 		if level == Low {
 			why = nil
@@ -449,7 +456,7 @@ func (e *Engine) Act(ctx context.Context, id string, a Action, comment string) (
 			return t, fmt.Errorf("%w: an answer needs a comment", ErrInvalidAction)
 		}
 		t.Description += "\n\nAnswers:\n" + comment
-		e.next(&t, StepReadiness)
+		e.next(&t, StepRefinement)
 	case ActionApprove:
 		if t.Wait == WaitSpec {
 			e.next(&t, StepBuild)

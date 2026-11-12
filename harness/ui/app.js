@@ -1,11 +1,11 @@
 // Harness UI: polls the API and renders the ticket list and the selected
 // ticket. No framework: the page is small enough not to need one.
-const STEPS = ["readiness", "spec", "build", "ci", "review", "risk", "merge", "deploy", "smoke"];
-const STEP_LABEL = { readiness: "Readiness", spec: "Spec", build: "Build", ci: "CI", review: "Review", risk: "Risk gate",
+const STEPS = ["refinement", "spec", "build", "ci", "review", "risk", "merge", "deploy", "smoke"];
+const STEP_LABEL = { refinement: "Refinement", spec: "Spec", build: "Build", ci: "CI", review: "Review", risk: "Risk gate",
   merge: "Merge", deploy: "Deploy", smoke: "Smoke test", resume: "Resume" };
 const ACTION_LABEL = { answer: "Send answer", approve: "Approve and merge", revise: "Ask for changes", retry: "Retry with guidance",
   takeover: "Take over", resume: "Resume", abandon: "Abandon" };
-const WAIT_TITLE = { questions: "The readiness check has questions", spec: "Check the spec before it's built", escalated: "Escalated: it needs your decision",
+const WAIT_TITLE = { questions: "Refinement has questions", spec: "Check the spec before it's built", escalated: "Escalated: it needs your decision",
   approval: "Needs your approval to merge", takeover: "You've taken this over", error: "A step keeps failing" };
 
 const $ = (id) => document.getElementById(id);
@@ -55,7 +55,8 @@ async function refreshList() {
   $("workflow-link").classList.toggle("active", !selected && $("create").hidden);
   $("tickets").replaceChildren(...tickets.map((t) => el("a", { href: `#${t.id}`, class: t.id === selected ? "active" : "" },
     el("div", { class: "t-title" }, el("span", { class: `dot ${dotClass(t)}` }), t.title),
-    el("div", { class: `t-sub ${t.status === "waiting" ? "needs" : ""}` }, `${t.id} · ${statusText(t)}`))));
+    el("div", { class: `t-sub ${t.status === "waiting" ? "needs" : ""}` },
+      `${t.id}${t.source ? ` · ${SOURCE_LABEL[t.source] || t.source}` : ""} · ${statusText(t)}`))));
 }
 
 async function refreshImprovements() {
@@ -103,6 +104,11 @@ async function refreshTicket() {
   $("t-spec").textContent = t.spec || "";
 
   const meta = [];
+  if (t.source) {
+    const from = `From ${SOURCE_LABEL[t.source] || t.source}${t.occurrences > 1 ? `, reported ${t.occurrences} times` : ""}`;
+    meta.push(t.externalURL ? el("a", { href: t.externalURL, target: "_blank", rel: "noopener" }, `${from} ↗`) : el("span", {}, from));
+  }
+  if (t.regressionOf) meta.push(el("a", { href: `#${t.regressionOf}` }, `Came back after ${t.regressionOf}`));
   if (t.branch) meta.push(el("span", { class: "mono" }, t.branch));
   if (t.builds) meta.push(el("span", {}, `${t.builds} build${t.builds > 1 ? "s" : ""}`));
   if (t.risk) meta.push(el("span", {}, `risk ${t.risk}`));
@@ -205,6 +211,7 @@ function label(t, a) {
 }
 
 const KIND_LABEL = { agent: "Agent", check: "Check", gate: "Gate", ship: "Ship" };
+const SOURCE_LABEL = { ui: "New ticket", sentry: "Sentry", webhook: "Webhook" };
 const RUNNER_LABEL = { "claude-cli": "Claude Code", "cursor-cli": "Cursor (read-only)" };
 
 async function refreshWorkflow() {
@@ -246,6 +253,13 @@ async function refreshWorkflow() {
       s.loops ? el("ul", { class: "loops" }, ...s.loops.map((l) => el("li", {}, l))) : null,
       agent);
   };
+  $("sources").replaceChildren(...wf.sources.map((src) => el("div", { class: `source ${src.kind}` },
+    el("div", { class: "flow-head" }, el("b", {}, SOURCE_LABEL[src.name] || src.name),
+      el("span", { class: `kind ${src.kind === "reactive" ? "gate" : "agent"}` }, src.kind)),
+    el("p", { class: "muted" }, src.name === "ui" ? "The New ticket button." :
+      `POST ${src.path}. At most ${src.maxOpen} open; repeats of an open problem are added to its ticket. ` +
+      (src.kind === "reactive" ? "You approve every fix before it merges. " : "") +
+      (src.signed ? "Signed reports only." : "Not signed: set its secret before exposing it.")))));
   $("flow").replaceChildren(...wf.steps.map((s, i) => card(s, i + 1)));
   $("flow-retro").replaceChildren(el("ol", { class: "flow" }, card(wf.retro)));
 }
