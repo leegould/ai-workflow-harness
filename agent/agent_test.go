@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-type ticket struct{ ID, Title, Description string }
+type ticket struct{ ID, Title, Description, Spec string }
 
 type buildRequest struct {
 	Ticket   ticket
@@ -15,6 +15,13 @@ type buildRequest struct {
 	Feedback string
 	Spec     string
 	SpecPath string
+}
+
+type reviewRequest struct {
+	Ticket    ticket
+	Diff      string
+	Truncated bool
+	Previous  string
 }
 
 type specRequest struct {
@@ -37,6 +44,8 @@ func TestStepFilesLoad(t *testing.T) {
 		{"build", buildRequest{Ticket: tk, Spec: "# T-9: Health", SpecPath: "specs/T-9.md"}, []string{"has a spec", "# T-9: Health", "as specs/T-9.md"}},
 		{"spec", specRequest{Ticket: tk, Refinement: []string{"JSON, not text"}}, []string{"Ticket T-9: Health", "- JSON, not text"}},
 		{"spec", specRequest{Ticket: tk, Previous: "# old spec"}, []string{"asked for changes", "# old spec"}},
+		{"review", reviewRequest{Ticket: ticket{ID: "T-9", Title: "Health", Spec: "## Out of scope"}, Diff: "+added line"}, []string{"Ticket T-9: Health", "+added line", "Spec:\n<<<\n## Out of scope"}},
+		{"review", reviewRequest{Ticket: tk, Diff: "x", Truncated: true, Previous: "CI failed: vet"}, []string{"cut short", "later round", "CI failed: vet"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.step, func(t *testing.T) {
