@@ -75,7 +75,7 @@ reason.
 | Risk gate | **Deterministic floor from `pipeline.yaml`:** paths (agent rules, dependencies, the CLI the smoke test uses) and diff size. Changing a file the spec didn't plan makes it at least medium |
 | Merge, deploy, smoke, revert | Local git and go against the stand-in repo, with a deploy folder each for dev and production |
 | Production gate | `production.approval` in `pipeline.yaml`: manual (the default) or auto. Production gets the exact commit that passed on dev, and a failure there rolls it back to what it ran before. The **Releases** page lists what's on dev and not in production, in merge order. Shipping one ships everything merged before it, so it's refused until all of that has passed on dev, and they're all marked released together |
-| Review | Stub: approves unless the ticket says `never-approve` |
+| Review | Agent (`steps/review.md`), read-only on the ticket's branch, with the diff and the spec. It judges the change against the spec (scope, "done when") and the target's `CLAUDE.md`, and asks for changes only for things that matter, each with a specific fix. Changes go back to the build within the round cap, and the next review is told what was asked. It runs on Cursor's GPT by default, so a different model family checks Claude's build |
 
 ## Sources: where tickets come from
 

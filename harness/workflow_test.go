@@ -25,7 +25,7 @@ func TestWorkflowShowsEachAgentStepsModel(t *testing.T) {
 			}
 		}
 	}
-	if len(wf.Steps) != 11 || len(agents) != 3 || wf.Retro.Agent == nil || len(wf.Models) == 0 {
+	if len(wf.Steps) != 11 || len(agents) != 4 || wf.Retro.Agent == nil || len(wf.Models) == 0 {
 		t.Fatalf("got %d steps, agents %v, models %v", len(wf.Steps), agents, wf.Models)
 	}
 }

@@ -293,6 +293,11 @@ func (l Local) RunCI(ctx context.Context, sha string) (CIResult, error) {
 }
 
 // ChangedFiles lists what branch changes relative to where it left main.
+// Diff is branch's change against main, as a unified diff.
+func (l Local) Diff(ctx context.Context, branch string) (string, error) {
+	return git(ctx, "", "--git-dir", l.Origin(), "diff", "refs/heads/main...refs/heads/"+branch)
+}
+
 func (l Local) ChangedFiles(ctx context.Context, branch string) ([]FileChange, error) {
 	out, err := git(ctx, "", "--git-dir", l.Origin(), "diff", "--numstat", "refs/heads/main...refs/heads/"+branch)
 	if err != nil {

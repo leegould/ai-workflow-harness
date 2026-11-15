@@ -44,6 +44,15 @@ func (f fakeAgent) Run(_ context.Context, step agent.StepDef, prompt, _ string) 
 		}
 		v = sp
 	}
+	if step.Name == "review" {
+		rv := map[string]any{"approved": true, "summary": "does what the spec says", "issues": []any{}}
+		later := strings.Contains(prompt, "This is a later round")
+		if strings.Contains(prompt, "never-approve") || strings.Contains(prompt, "REVIEWONCE") && !later {
+			rv = map[string]any{"approved": false, "summary": "misses the error path",
+				"issues": []map[string]string{{"file": "poster.go", "problem": "Load ignores a missing title", "fix": "return an error"}}}
+		}
+		v = rv
+	}
 	if step.Name == "build" && !strings.Contains(prompt, "This ticket has a spec") {
 		return agent.AgentResult{}, errors.New("build prompt has no spec")
 	}
@@ -79,11 +88,13 @@ type fakeRepo struct {
 
 func (f *fakeRepo) sha() string { f.n++; return fmt.Sprintf("sha%07d", f.n) }
 
-func (f *fakeRepo) Checkout(_ context.Context, _, branch string) (string, error) {
+// Checkout records the branches builds were made on (review reads them too,
+// under its own key, and isn't counted).
+func (f *fakeRepo) Checkout(_ context.Context, key, branch string) (string, error) {
 	if f.broken != nil {
 		return "", f.broken
 	}
-	if branch != "main" {
+	if branch != "main" && !strings.HasSuffix(key, "-review") {
 		f.branches = append(f.branches, branch)
 	}
 	return f.dir, nil
@@ -119,6 +130,9 @@ func (f *fakeRepo) Contains(_ context.Context, commit, ancestor string) (bool, e
 func (f *fakeRepo) Revert(_ context.Context, sha string) (string, error) {
 	f.reverted = append(f.reverted, sha)
 	return f.sha(), nil
+}
+func (f *fakeRepo) Diff(context.Context, string) (string, error) {
+	return "diff --git a/poster.go b/poster.go\n+// a change\n", nil
 }
 func (f *fakeRepo) ChangedFiles(context.Context, string) ([]target.FileChange, error) {
 	return f.changed, nil
@@ -758,7 +772,10 @@ func TestSendBackFromTheProductionGateRevertsAndRebuilds(t *testing.T) {
 	h.act(id, ActionRetry, "the date is too small on dev")
 	tk := h.drain(id)
 	expectWaiting(t, tk, WaitPromote) // built again, deployed to dev again
-	if len(h.repo.reverted) != 1 || tk.Attempt != 2 || tk.Builds != 2 || !strings.Contains(tk.Feedback, "the date is too small") {
+	evs, _ := h.e.Store.Events(context.Background(), id)
+	if len(h.repo.reverted) != 1 || tk.Attempt != 2 || tk.Builds != 2 || !slices.ContainsFunc(evs, func(ev Event) bool {
+		return ev.Kind == "human" && strings.Contains(ev.Detail, "the date is too small")
+	}) {
 		t.Fatalf("got %+v, reverted %v", tk, h.repo.reverted)
 	}
 	h.act(id, ActionAbandon, "")
@@ -835,5 +852,39 @@ func TestCantShipPastATicketStillTestingOnDev(t *testing.T) {
 	}
 	if _, err := h.e.Act(ctx, second, ActionPromote, ""); !errors.Is(err, ErrInvalidAction) || !strings.Contains(err.Error(), first) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// Changes the review asks for go back to the build, and the next review is
+// told what was asked so it checks that rather than starting over.
+func TestReviewChangesGoBackToTheBuild(t *testing.T) {
+	h := newHarness(t)
+	id := h.create("Add a dark theme REVIEWONCE")
+	tk := h.drain(id)
+	expectDeployed(t, tk)
+	if tk.Builds != 2 || tk.Feedback != "" {
+		t.Fatalf("builds %d, feedback %q", tk.Builds, tk.Feedback)
+	}
+	evs, _ := h.e.Store.Events(context.Background(), id)
+	var reviews []string
+	for _, ev := range evs {
+		if ev.Step == StepReview {
+			reviews = append(reviews, ev.Message)
+			if ev.By == "" {
+				t.Fatal("review event doesn't say which model ran it")
+			}
+		}
+	}
+	if len(reviews) != 2 || !strings.Contains(reviews[0], "asked for 1 change") || reviews[1] != "Review approved" {
+		t.Fatalf("got %v", reviews)
+	}
+}
+
+func TestAReviewThatNeverApprovesEscalates(t *testing.T) {
+	h := newHarness(t)
+	tk := h.drain(h.create("Add a dark theme never-approve"))
+	expectWaiting(t, tk, WaitEscalated)
+	if tk.Builds != 3 || !strings.Contains(tk.WaitText, "Review asked for changes") || !strings.Contains(tk.WaitText, "Fix: return an error") {
+		t.Fatalf("got %+v", tk)
 	}
 }

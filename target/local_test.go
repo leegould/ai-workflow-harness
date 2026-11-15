@@ -136,6 +136,12 @@ func TestMergeDeploySmokeRevert(t *testing.T) {
 	if smoke, _ := l.Smoke(ctx, Dev); !smoke.Passed {
 		t.Fatalf("smoke failed after revert: %s", smoke.Log)
 	}
+	push(t, l, "ai/T-1/3", func(dir string) {
+		write(t, filepath.Join(dir, "poster.json"), `{"title": "Diffed"}`)
+	})
+	if d, err := l.Diff(ctx, "ai/T-1/3"); err != nil || !strings.Contains(d, `+{"title": "Diffed"}`) {
+		t.Fatalf("diff %q %v", d, err)
+	}
 	if ok, err := l.Contains(ctx, broken, merged); err != nil || !ok {
 		t.Fatalf("later merge should contain the earlier one: %v %v", ok, err)
 	}

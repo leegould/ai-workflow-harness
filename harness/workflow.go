@@ -76,8 +76,8 @@ func (e *Engine) Workflow() (Workflow, error) {
 		{ID: StepCI, Label: "CI", Kind: "check",
 			Summary: "The harness runs gofmt, vet and the tests itself, whatever the agent says it ran.",
 			Loops:   []string{"Fail: back to Build with the log"}},
-		{ID: StepReview, Label: "Review", Kind: "check",
-			Summary: "A stub for now: approves unless the ticket says never-approve.",
+		{ID: StepReview, Label: "Review", Kind: "agent",
+			Summary: "Reads the diff against the spec and the repo's CLAUDE.md, read-only, ideally on a different model from the build.",
 			Loops:   []string{"Changes asked for: back to Build"}},
 		{ID: StepRisk, Label: "Risk gate", Kind: "gate",
 			Summary: "Paths and diff size from pipeline.yaml, plus any file the spec didn't plan.",
@@ -145,7 +145,7 @@ func (e *Engine) checkRunner(step agent.StepDef) error {
 }
 
 // agentSteps are the steps whose model can be chosen.
-var agentSteps = []string{"refinement", "spec", "build", "retro"}
+var agentSteps = []string{"refinement", "spec", "build", "review", "retro"}
 
 // SetModel changes the runner and model an agent step runs on, from the ones
 // pipeline.yaml allows, and only to a runner that can run that step. It edits

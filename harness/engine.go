@@ -30,6 +30,7 @@ type Repo interface {
 	HeadSHA(ctx context.Context, branch string) (string, error)
 	RunCI(ctx context.Context, sha string) (target.CIResult, error)
 	ChangedFiles(ctx context.Context, branch string) ([]target.FileChange, error)
+	Diff(ctx context.Context, branch string) (string, error)
 	Merge(ctx context.Context, branch, message string) (sha string, err error)
 	Revert(ctx context.Context, mergeSHA string) (sha string, err error)
 	// Deploy builds ref (a branch or commit) and runs it in env (target.Dev
@@ -325,16 +326,64 @@ func (e *Engine) ci(ctx context.Context, t *Ticket) error {
 	return nil
 }
 
-// review is still a stub: "never-approve" in the ticket forces the loop.
+// reviewRequest is what the review step's prompt is rendered from.
+type reviewRequest struct {
+	Ticket    Ticket
+	Diff      string
+	Truncated bool
+	Previous  string // what the last review or CI run asked for, if any
+}
+
+type reviewOutput struct {
+	Approved bool   `json:"approved"`
+	Summary  string `json:"summary"`
+	Issues   []struct {
+		File    string `json:"file"`
+		Problem string `json:"problem"`
+		Fix     string `json:"fix"`
+	} `json:"issues"`
+}
+
+// maxReviewDiff keeps the prompt a sensible size; the reviewer can read the
+// files for the rest.
+const maxReviewDiff = 60_000
+
+// review has an agent judge the change against its spec and the repo's
+// rules, read-only. Changes it asks for go back to the build, within the
+// round cap, like a CI failure.
 func (e *Engine) review(ctx context.Context, t *Ticket) error {
-	if strings.Contains(t.Description, "never-approve") {
-		e.event(ctx, t, "agent", "Review (stub) asked for changes", "handle the error path")
-		t.Feedback = "Review: handle the error path"
-		e.next(t, StepBuild)
+	diff, err := e.Repo.Diff(ctx, t.Branch)
+	if err != nil {
+		return fmt.Errorf("diff: %w", err)
+	}
+	req := reviewRequest{Ticket: *t, Diff: diff, Previous: t.Feedback}
+	if len(diff) > maxReviewDiff {
+		req.Diff, req.Truncated = diff[:maxReviewDiff], true
+	}
+	dir, err := e.Repo.Checkout(ctx, t.ID+"-review", t.Branch)
+	if err != nil {
+		return fmt.Errorf("check out: %w", err)
+	}
+	var out reviewOutput
+	run, err := e.runAgent(ctx, "review", req, dir, &out)
+	if err != nil {
+		return err
+	}
+	t.CostUSD += run.Cost
+	if out.Approved && len(out.Issues) == 0 {
+		e.costEvent(ctx, t, "agent", "Review approved", out.Summary, run)
+		t.Feedback = ""
+		e.next(t, StepRisk)
 		return nil
 	}
-	e.event(ctx, t, "agent", "Review (stub) approved", "")
-	e.next(t, StepRisk)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Review asked for changes: %s\n", out.Summary)
+	for i, is := range out.Issues {
+		fmt.Fprintf(&b, "\n%d. %s: %s\n   Fix: %s\n", i+1, is.File, is.Problem, is.Fix)
+	}
+	t.Feedback = b.String()
+	e.costEvent(ctx, t, "agent", fmt.Sprintf("Review asked for %d change(s), back to the builder", len(out.Issues)), t.Feedback, run)
+	e.next(t, StepBuild)
 	return nil
 }
 
