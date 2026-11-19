@@ -43,6 +43,17 @@ models:
     - gpt-5.6-sol-high
     - cursor-grok-4.5-high
 
+# What a sandboxed agent step (sandbox: native in its step file) may reach.
+# Its shell commands can write only to its checkout, the temp dir and
+# cache_dir, and connect only to the hosts in network: anything else is
+# refused. cache_dir holds the sandbox's own Go build and module caches, kept
+# apart from yours so a sandboxed build can't plant entries in them.
+sandbox:
+  network:
+    - proxy.golang.org
+    - sum.golang.org
+  cache_dir: .harness/sandbox-cache
+
 # After refinement, an agent writes a short spec, committed with the change as
 # specs/<ticket>.md. When does a human approve it before anything is built?
 #   risky:  when the files it plans to change hit a medium or high rule below

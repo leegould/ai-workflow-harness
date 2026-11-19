@@ -16,7 +16,24 @@ var ErrAgentFailed = errors.New("agent run failed")
 // ClaudeCLI runs a step through Claude Code in headless mode, using the
 // machine's Claude Code login.
 type ClaudeCLI struct {
-	Bin string // defaults to "claude"
+	Bin     string        // defaults to "claude"
+	Sandbox SandboxPolicy // what a step with sandbox: native may reach
+}
+
+// Check reports whether this machine can run step's sandbox. Claude Code runs
+// none or native; a native sandbox it can't start would otherwise fail the
+// step at run time, or worse, run it unsandboxed.
+func (c ClaudeCLI) Check(step StepDef) error {
+	switch step.Sandbox {
+	case "", SandboxNone:
+		return nil
+	case SandboxNative:
+		if _, err := NativeSandbox(); err != nil {
+			return fmt.Errorf("step %s: %w", step.Name, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("step %s: %w: claude-cli doesn't run in %s yet", step.Name, ErrSandboxUnavailable, step.Sandbox)
 }
 
 type claudeOutput struct {
@@ -28,6 +45,9 @@ type claudeOutput struct {
 }
 
 func (c ClaudeCLI) Run(ctx context.Context, step StepDef, prompt, dir string) (AgentResult, error) {
+	if err := c.Check(step); err != nil {
+		return AgentResult{}, err
+	}
 	bin := c.Bin
 	if bin == "" {
 		bin = "claude"
@@ -72,9 +92,20 @@ func (c ClaudeCLI) Run(ctx context.Context, step StepDef, prompt, dir string) (A
 		}
 		args = append(args, "--json-schema", string(schema))
 	}
+	var env []string // nil: the worker's own environment
+	if step.Sandbox == SandboxNative {
+		settings, sandboxEnv, err := claudeSandbox(c.Sandbox)
+		if err != nil {
+			return AgentResult{}, fmt.Errorf("step %s: %w", step.Name, err)
+		}
+		// --settings still applies under --setting-sources "" and --restricted.
+		args = append(args, "--settings", settings)
+		env = sandboxEnv
+	}
 
 	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // args come from reviewed step files
 	cmd.Dir = dir
+	cmd.Env = env
 
 	out, err := cmd.Output()
 	if err != nil {

@@ -8,6 +8,7 @@ runner: cursor-cli
 model: gpt-5.3-codex
 tools: [Read, Glob, Grep]
 max_budget_usd: 0.40
+sandbox: none
 schema:
   type: object
   properties:

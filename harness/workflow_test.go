@@ -96,3 +96,46 @@ func TestWorkflowAPI(t *testing.T) {
 		t.Fatalf("bad json: %d", code)
 	}
 }
+
+// fakeClaudeCheck runs like fakeAgent but refuses what the real ClaudeCLI
+// refuses on this machine.
+type fakeClaudeCheck struct{ fakeAgent }
+
+func (fakeClaudeCheck) Check(step agent.StepDef) error { return agent.ClaudeCLI{}.Check(step) }
+
+func TestSetSandbox(t *testing.T) {
+	h := newHarness(t)
+	h.e.Runner = agent.Runners{"claude-cli": fakeClaudeCheck{}, "cursor-cli": fakeCursor{}}
+	if err := h.e.SetSandbox("build", agent.SandboxNone); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := agent.LoadStep(h.e.StepsDir, "build"); s.Sandbox != agent.SandboxNone {
+		t.Fatalf("got %q", s.Sandbox)
+	}
+	for name, args := range map[string][2]string{
+		"no runner supports it yet": {"build", agent.SandboxOpenSandbox},
+		"cursor has no shell":       {"spec", agent.SandboxNative},
+		"unknown sandbox":           {"build", "docker"},
+		"not an agent step":         {"ci", agent.SandboxNone},
+	} {
+		if err := h.e.SetSandbox(args[0], args[1]); !errors.Is(err, ErrBadModel) {
+			t.Fatalf("%s: got %v", name, err)
+		}
+	}
+	wf, err := h.e.Workflow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range wf.Steps {
+		if s.ID != StepBuild {
+			continue
+		}
+		unavailable := map[string]string{}
+		for _, o := range s.Agent.Sandboxes {
+			unavailable[o.ID] = o.Unavailable
+		}
+		if len(unavailable) != 3 || unavailable[agent.SandboxNone] != "" || unavailable[agent.SandboxOpenSandbox] == "" {
+			t.Fatalf("got %v", unavailable)
+		}
+	}
+}

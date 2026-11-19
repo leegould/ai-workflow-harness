@@ -105,6 +105,28 @@ can raise a lot of tickets, so the guardrails are in code:
 `scripts/fake-sentry.sh` sends a Sentry-shaped report about the poster, so you can watch
 an error become a ticket, a spec, a fix and a deploy without a Sentry account.
 
+## Sandboxes
+
+Once tickets can come from outside, a Sentry report or a webhook, the text an agent
+reads isn't always yours, and the build agent can run code (`go test` runs whatever it
+wrote). Each agent step's file sets `sandbox:`, and the Workflow page can change it:
+
+- **none**: no sandbox, the default. Read-only steps have no shell to contain.
+- **native**: the runner's own OS sandbox. For Claude Code that's Seatbelt on macOS
+  (built in, nothing to install) or bubblewrap on Linux (install `bubblewrap` and
+  `socat`). The build step uses it. Shell commands, and everything they start, can write
+  only to the checkout, the temp dir and the sandbox's own cache, and connect only to the
+  hosts in `pipeline.yaml`'s `sandbox.network`. Anything else is refused, not asked about,
+  and the agent can't retry it outside the sandbox. If the sandbox can't start, the step
+  fails rather than running without it.
+- **opensandbox**: a container through [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox).
+  It's listed but no runner supports it yet. It needs Docker and the OpenSandbox server.
+
+Go's build and module caches for sandboxed runs live in `.harness/sandbox-cache`, not
+your own, so a sandboxed build can't plant entries your normal builds would use. The
+file tools (Read, Edit, Write) aren't covered by the OS sandbox; they're confined to the
+checkout by Claude Code's `--restricted` mode instead.
+
 ## Specs
 
 Once refinement says a ticket is ready, a spec agent writes a short brief: the goal, what's

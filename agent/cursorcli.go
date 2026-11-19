@@ -50,6 +50,9 @@ func (c CursorCLI) Check(step StepDef) error {
 			return fmt.Errorf("step %s: %w: cursor-cli runs read-only steps, and this one uses %s", step.Name, ErrUnsupportedStep, tool)
 		}
 	}
+	if step.Sandbox != "" && step.Sandbox != SandboxNone {
+		return fmt.Errorf("step %s: %w: cursor-cli has no shell to sandbox, so it runs with sandbox: none", step.Name, ErrSandboxUnavailable)
+	}
 	return nil
 }
 

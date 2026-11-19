@@ -12,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"aiharness/agent"
 	"aiharness/target"
 )
 
@@ -52,6 +53,8 @@ type Config struct {
 	Models map[string][]string `yaml:"models"`
 	// Sources are where tickets come from besides the New ticket button.
 	Sources map[string]SourceConfig `yaml:"sources"`
+	// Sandbox is what a step with sandbox: native may reach.
+	Sandbox agent.SandboxPolicy `yaml:"sandbox"`
 }
 
 // SpecConfig says when a human approves the spec before the build: when the

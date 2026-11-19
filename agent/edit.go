@@ -59,6 +59,21 @@ func EditPrompt(dir, name, find, replace string) error {
 // those two lines of the frontmatter and nothing else, so tools, permissions
 // and budget stay as reviewed, and the change shows up as a small diff.
 func SetRunnerModel(dir, name, runner, model string) error {
+	return setLines(dir, name, [][2]string{{"runner", runner}, {"model", model}}, func(s StepDef) bool {
+		return s.Runner == runner && s.Model == model
+	})
+}
+
+// SetSandbox changes a step's sandbox: line and nothing else.
+func SetSandbox(dir, name, sandbox string) error {
+	return setLines(dir, name, [][2]string{{"sandbox", sandbox}}, func(s StepDef) bool {
+		return s.Sandbox == sandbox
+	})
+}
+
+// setLines rewrites top-level frontmatter lines, then checks the step still
+// loads and reads back as intended before writing it.
+func setLines(dir, name string, lines [][2]string, readsBack func(StepDef) bool) error {
 	raw, err := readStep(dir, name)
 	if err != nil {
 		return err
@@ -67,7 +82,7 @@ func SetRunnerModel(dir, name, runner, model string) error {
 	if !ok {
 		return fmt.Errorf("step %s: missing --- frontmatter", name)
 	}
-	for _, kv := range [][2]string{{"runner", runner}, {"model", model}} {
+	for _, kv := range lines {
 		line := regexp.MustCompile(`(?m)^` + kv[0] + `:[^\n]*$`)
 		if len(line.FindAllStringIndex(front, -1)) != 1 {
 			return fmt.Errorf("step %s: %w: %s", name, ErrNoSettingLine, kv[0])
@@ -79,8 +94,8 @@ func SetRunnerModel(dir, name, runner, model string) error {
 	if err != nil {
 		return fmt.Errorf("change would break step %s: %w", name, err)
 	}
-	if s.Runner != runner || s.Model != model {
-		return fmt.Errorf("step %s: reads back as %s/%s, not %s/%s", name, s.Runner, s.Model, runner, model)
+	if !readsBack(s) {
+		return fmt.Errorf("step %s: %w: change doesn't read back", name, ErrNoSettingLine)
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {

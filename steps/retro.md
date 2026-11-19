@@ -8,6 +8,7 @@ runner: claude-cli
 model: claude-sonnet-5-5
 tools: []
 max_budget_usd: 0.30
+sandbox: none
 schema:
   type: object
   properties:

@@ -32,6 +32,16 @@ type AgentInfo struct {
 	Tools     []string `json:"tools"`
 	BudgetUSD float64  `json:"budgetUSD"`
 	Runners   []string `json:"runners"`
+	Sandbox   string   `json:"sandbox"`
+	// Sandboxes are every sandbox, with why this step can't use it, if not.
+	Sandboxes []SandboxOption `json:"sandboxes"`
+}
+
+// SandboxOption is one choice of sandbox for a step.
+type SandboxOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 // SourceInfo is one place tickets come from.
@@ -125,7 +135,22 @@ func (e *Engine) agentInfo(name string) (AgentInfo, error) {
 	if err != nil {
 		return AgentInfo{}, fmt.Errorf("load step: %w", err)
 	}
-	info := AgentInfo{Step: name, Runner: s.Runner, Model: s.Model, Tools: s.Tools, BudgetUSD: s.MaxBudgetUSD}
+	info := AgentInfo{Step: name, Runner: s.Runner, Model: s.Model, Tools: s.Tools, BudgetUSD: s.MaxBudgetUSD,
+		Sandbox: s.Sandbox}
+	native, err := agent.NativeSandbox()
+	if err != nil {
+		native = "OS sandbox"
+	}
+	labels := map[string]string{agent.SandboxNone: "None", agent.SandboxNative: native, agent.SandboxOpenSandbox: "OpenSandbox"}
+	for _, id := range agent.Sandboxes {
+		alt := s
+		alt.Sandbox = id
+		opt := SandboxOption{ID: id, Label: labels[id]}
+		if err := e.checkRunner(alt); err != nil {
+			opt.Unavailable = err.Error()
+		}
+		info.Sandboxes = append(info.Sandboxes, opt)
+	}
 	for _, runner := range slices.Sorted(maps.Keys(e.Config.Models)) {
 		alt := s
 		alt.Runner = runner
@@ -140,6 +165,30 @@ func (e *Engine) agentInfo(name string) (AgentInfo, error) {
 func (e *Engine) checkRunner(step agent.StepDef) error {
 	if c, ok := e.Runner.(agent.Checker); ok {
 		return c.Check(step) //nolint:wrapcheck // names the step and runner already
+	}
+	return nil
+}
+
+// SetSandbox changes the sandbox an agent step's shell commands run in, to one
+// its runner can use on this machine. It edits only the step file's sandbox
+// line. Tickets in flight use it from their next run of that step.
+func (e *Engine) SetSandbox(step, sandbox string) error {
+	if !slices.Contains(agentSteps, step) {
+		return fmt.Errorf("%w: %s isn't an agent step", ErrBadModel, step)
+	}
+	if !slices.Contains(agent.Sandboxes, sandbox) {
+		return fmt.Errorf("%w: sandbox must be one of %v", ErrBadModel, agent.Sandboxes)
+	}
+	def, err := agent.LoadStep(e.StepsDir, step)
+	if err != nil {
+		return fmt.Errorf("load step: %w", err)
+	}
+	def.Sandbox = sandbox
+	if err := e.checkRunner(def); err != nil {
+		return fmt.Errorf("%w: %w", ErrBadModel, err)
+	}
+	if err := agent.SetSandbox(e.StepsDir, step, sandbox); err != nil {
+		return fmt.Errorf("set sandbox: %w", err)
 	}
 	return nil
 }

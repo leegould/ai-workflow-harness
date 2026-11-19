@@ -14,6 +14,11 @@ allowed_tools:
   - Bash(gofmt:*)
 permission_mode: acceptEdits
 max_budget_usd: 1.00
+# Its shell commands (and the code go test runs) are sandboxed: they can write
+# only to the checkout and reach only the hosts in pipeline.yaml's sandbox:.
+# native is Seatbelt on macOS, bubblewrap on Linux. Ticket text can come from
+# outside now (Sentry, webhooks), so this is what contains a prompt injection.
+sandbox: native
 schema:
   type: object
   properties:
