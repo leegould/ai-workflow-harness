@@ -122,6 +122,11 @@ wrote). Each agent step's file sets `sandbox:`, and the Workflow page can change
 - **opensandbox**: a container through [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox).
   It's listed but no runner supports it yet. It needs Docker and the OpenSandbox server.
 
+A sandbox that's set but not installed is an error, never a reason to run without it. The
+harness won't start while a step file asks for one this machine can't provide, and names
+each step. If a step file is edited by hand while it runs, a ticket that reaches that step
+stops straight away with the reason, without retrying.
+
 Go's build and module caches for sandboxed runs live in `.harness/sandbox-cache`, not
 your own, so a sandboxed build can't plant entries your normal builds would use. The
 file tools (Read, Edit, Write) aren't covered by the OS sandbox; they're confined to the

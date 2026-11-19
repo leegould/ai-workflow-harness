@@ -139,3 +139,26 @@ func TestSetSandbox(t *testing.T) {
 		}
 	}
 }
+
+func TestStepsThisMachineCantRun(t *testing.T) {
+	h := newHarness(t)
+	h.e.Runner = agent.Runners{"claude-cli": fakeClaudeCheck{}, "cursor-cli": fakeCursor{}}
+	if err := h.e.CheckSteps(); err != nil {
+		t.Fatalf("the committed step files should run here: %v", err)
+	}
+	// A hand edit, which the Workflow page would have refused: no runner can
+	// use opensandbox yet.
+	if err := agent.SetSandbox(h.e.StepsDir, "build", agent.SandboxOpenSandbox); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.CheckSteps(); !errors.Is(err, agent.ErrSandboxUnavailable) {
+		t.Fatalf("startup check: got %v", err)
+	}
+	// A ticket that reaches the step stops at once, without retries, and the
+	// build never runs unsandboxed.
+	tk := h.drain(h.create("Add a dark theme"))
+	expectWaiting(t, tk, WaitError)
+	if tk.Failures != 1 || tk.Round != 0 {
+		t.Fatalf("got %d failures, round %d", tk.Failures, tk.Round)
+	}
+}

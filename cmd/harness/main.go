@@ -67,6 +67,9 @@ func run(addr, db, targetDir, seed, steps, config string, workers int) error {
 		StepsDir: steps,
 		Config:   cfg,
 	}
+	if err := engine.CheckSteps(); err != nil {
+		return fmt.Errorf("steps this machine can't run as configured (install what's missing, or change the step file):\n%w", err)
+	}
 	srv := &http.Server{
 		Addr: addr,
 		Handler: harness.Server(engine, map[string]string{

@@ -193,6 +193,27 @@ func (e *Engine) SetSandbox(step, sandbox string) error {
 	return nil
 }
 
+// errSetup marks a step this machine can't run as configured.
+var errSetup = errors.New("step not runnable here")
+
+// CheckSteps reports every agent step this machine can't run as configured:
+// a runner it doesn't have, or a sandbox that isn't installed. The harness
+// won't start until they're fixed, rather than finding out when a ticket
+// reaches the step.
+func (e *Engine) CheckSteps() error {
+	var errs []error
+	for _, name := range agentSteps {
+		step, err := agent.LoadStep(e.StepsDir, name)
+		if err == nil {
+			err = e.checkRunner(step)
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // agentSteps are the steps whose model can be chosen.
 var agentSteps = []string{"refinement", "spec", "build", "review", "retro"}
 
