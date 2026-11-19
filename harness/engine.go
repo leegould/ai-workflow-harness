@@ -204,6 +204,14 @@ func (e *Engine) wait(ctx context.Context, t *Ticket, w Wait, text string) {
 // human. It never touches the build round or the builder's feedback.
 func (e *Engine) failed(ctx context.Context, t *Ticket, err error) {
 	t.Failures++
+	if errors.Is(err, errSetup) {
+		// The machine can't run the step as configured (a sandbox that isn't
+		// installed, say). Retrying won't install it, and running without it
+		// isn't an option, so it goes straight to a human.
+		e.event(ctx, t, "error", "Step can't run on this machine", err.Error())
+		e.wait(ctx, t, WaitError, fmt.Sprintf("The %s step can't run here as configured:\n%v", t.Step, err))
+		return
+	}
 	e.event(ctx, t, "error", fmt.Sprintf("Step failed (attempt %d of %d)", t.Failures, MaxFailures), err.Error())
 	if t.Failures < MaxFailures {
 		t.Status = Queued
@@ -699,6 +707,11 @@ func (e *Engine) runAgent(ctx context.Context, name string, data any, dir string
 		return agentRun{}, fmt.Errorf("render step: %w", err)
 	}
 	run := agentRun{By: step.Runner + "/" + step.Model}
+	// Checked on every run, not just at startup: step files can be edited
+	// while the harness runs.
+	if err := e.checkRunner(step); err != nil {
+		return run, fmt.Errorf("%w: %w", errSetup, err)
+	}
 	res, err := e.Runner.Run(ctx, step, prompt, dir)
 	if err != nil {
 		return run, fmt.Errorf("run %s agent: %w", name, err)
