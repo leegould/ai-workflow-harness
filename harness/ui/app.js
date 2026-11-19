@@ -244,8 +244,24 @@ async function refreshWorkflow() {
           status.textContent = `Saved: the next ${s.label.toLowerCase()} run uses ${model} via ${RUNNER_LABEL[runner] || runner}`;
         } catch (e) { status.className = "saved error"; status.textContent = e.message; select.value = current; }
       } }, ...groups);
+      const sandbox = el("select", { "aria-label": `Sandbox for ${s.label}`, onchange: async () => {
+        status.className = "saved";
+        status.textContent = "Saving…";
+        try {
+          await api(`/api/workflow/steps/${s.agent.step}/sandbox`, { sandbox: sandbox.value });
+          const label = sandbox.selectedOptions[0].textContent;
+          status.textContent = `Saved: the next ${s.label.toLowerCase()} run uses ${sandbox.value === "none" ? "no sandbox" : label}`;
+        } catch (e) { status.className = "saved error"; status.textContent = e.message; sandbox.value = s.agent.sandbox; }
+      } }, ...s.agent.sandboxes.map((o) => {
+        // A sandbox this step can't use is shown, greyed out, with the reason.
+        const opt = el("option", { value: o.id, title: o.unavailable || "" }, o.unavailable ? `${o.label} (unavailable)` : o.label);
+        opt.disabled = !!o.unavailable && o.id !== s.agent.sandbox;
+        opt.selected = o.id === s.agent.sandbox;
+        return opt;
+      }));
       agent = el("div", { class: "agent-cfg" },
         el("label", { class: "model" }, "Model", select),
+        el("label", { class: "model" }, "Sandbox", sandbox),
         el("span", { class: "muted" }, `tools: ${s.agent.tools.length ? s.agent.tools.join(", ") : "none"}`),
         el("span", { class: "muted" }, `budget: $${s.agent.budgetUSD.toFixed(2)} a run`),
         status);

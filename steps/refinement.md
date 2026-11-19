@@ -8,6 +8,7 @@ model: claude-sonnet-5-5
 # run anything. Blind, it asked "what should be purple?" of a one-page app (D43).
 tools: [Read, Glob, Grep]
 max_budget_usd: 0.40
+sandbox: none
 schema:
   type: object
   properties:

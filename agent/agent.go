@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -25,11 +26,14 @@ type StepDef struct {
 	Tools  []string `yaml:"tools"`
 	// AllowedTools are permission rules the agent may use without asking,
 	// e.g. "Bash(go test:*)". Headless runs can't ask, so anything else is denied.
-	AllowedTools   []string       `yaml:"allowed_tools"`
-	PermissionMode string         `yaml:"permission_mode"`
-	MaxBudgetUSD   float64        `yaml:"max_budget_usd"`
-	Schema         map[string]any `yaml:"schema"`
-	prompt         *template.Template
+	AllowedTools   []string `yaml:"allowed_tools"`
+	PermissionMode string   `yaml:"permission_mode"`
+	MaxBudgetUSD   float64  `yaml:"max_budget_usd"`
+	// Sandbox contains the step's shell commands: none, native (the runner's
+	// own OS sandbox) or opensandbox. See sandbox.go.
+	Sandbox string         `yaml:"sandbox"`
+	Schema  map[string]any `yaml:"schema"`
+	prompt  *template.Template
 }
 
 func LoadStep(dir, name string) (StepDef, error) {
@@ -65,6 +69,12 @@ func parseStep(name, raw string) (StepDef, error) {
 	}
 	if s.Runner == "" || s.Model == "" {
 		return StepDef{}, fmt.Errorf("step %s: runner and model are required", name)
+	}
+	if s.Sandbox == "" {
+		s.Sandbox = SandboxNone
+	}
+	if !slices.Contains(Sandboxes, s.Sandbox) {
+		return StepDef{}, fmt.Errorf("step %s: sandbox must be one of %v, not %q", name, Sandboxes, s.Sandbox)
 	}
 	var err error
 	s.prompt, err = template.New(name).Option("missingkey=error").Parse(body)

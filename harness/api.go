@@ -190,6 +190,24 @@ func Server(e *Engine, posterPages map[string]string) http.Handler {
 		reply(w, http.StatusOK, wf)
 	})
 
+	mux.HandleFunc("POST /api/workflow/steps/{step}/sandbox", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Sandbox string }
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			fail(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := e.SetSandbox(r.PathValue("step"), in.Sandbox); err != nil {
+			fail(w, status(err), err)
+			return
+		}
+		wf, err := e.Workflow()
+		if err != nil {
+			fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		reply(w, http.StatusOK, wf)
+	})
+
 	poster := func(env string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			page, ok := posterPages[env]
